@@ -19,7 +19,7 @@ class KaercherMqtt5Server {
      * @param {string} options.bindIP
      * @param {number} options.port
      * @param {(topic: string, payload: Buffer) => void} [options.onPublish]
-     * @param {() => void} [options.onConnected]
+     * @param {(clientId: string) => void} [options.onConnected]
      */
     constructor(options) {
         this.onPublish = options.onPublish;
@@ -63,7 +63,7 @@ class KaercherMqtt5Server {
                 this.socket = socket;
                 this._write(socket, {cmd: "connack", reasonCode: 0, sessionPresent: false, properties: {}});
                 Logger.info(`KaercherMqtt5Server client connected: ${packet.clientId}`);
-                this.onConnected?.();
+                this.onConnected?.(packet.clientId);
                 break;
             case "subscribe":
                 this._write(socket, {

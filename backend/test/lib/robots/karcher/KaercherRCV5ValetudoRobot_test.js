@@ -1,5 +1,8 @@
 const assert = require("node:assert");
-const { describe, it } = require("node:test");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { afterEach, describe, it } = require("node:test");
 
 const KaercherRCV5ValetudoRobot = require("../../../../lib/robots/karcher/KaercherRCV5ValetudoRobot");
 
@@ -25,6 +28,7 @@ describe("KaercherRCV5ValetudoRobot", () => {
                 "ConsumableMonitoringCapability",
                 "FanSpeedControlCapability",
                 "MapSegmentationCapability",
+                "OperationModeControlCapability",
                 "WaterUsageControlCapability"
             ]
         );
@@ -50,10 +54,10 @@ describe("KaercherRCV5ValetudoRobot", () => {
         assert.strictEqual(battery.flag, "charged");
     });
 
-    it("maps wind/water prop.post pushes onto fan speed / water grade preset attributes", () => {
+    it("maps wind/water/mode prop.post pushes onto their preset attributes", () => {
         const robot = buildRobot();
 
-        robot.parseAndUpdateState({wind: 3, water: 2});
+        robot.parseAndUpdateState({wind: 3, water: 2, mode: 1});
 
         const fanSpeed = robot.state.getFirstMatchingAttribute({
             attributeClass: "PresetSelectionStateAttribute",
@@ -63,14 +67,53 @@ describe("KaercherRCV5ValetudoRobot", () => {
             attributeClass: "PresetSelectionStateAttribute",
             attributeType: "water_grade"
         });
+        const operationMode = robot.state.getFirstMatchingAttribute({
+            attributeClass: "PresetSelectionStateAttribute",
+            attributeType: "operation_mode"
+        });
 
         assert.strictEqual(fanSpeed.value, "max");
         assert.strictEqual(waterGrade.value, "high");
+        assert.strictEqual(operationMode.value, "vacuum_and_mop");
     });
 
     describe("IMPLEMENTATION_AUTO_DETECTION_HANDLER", () => {
         it("returns false rather than throwing when productMode.ini doesn't exist", () => {
             assert.strictEqual(KaercherRCV5ValetudoRobot.IMPLEMENTATION_AUTO_DETECTION_HANDLER(), false);
+        });
+    });
+
+    describe("device identity persistence", () => {
+        // Regression coverage for the sn/mac reconnect bug: aiot_client doesn't
+        // always redo a full HTTP login on every MQTT reconnect (cached sessions),
+        // so sn/mac must survive a Valetudo restart rather than being re-learned
+        // from scratch every time.
+        const scratchPath = path.join(os.tmpdir(), `karcher-identity-test-${process.pid}.json`);
+        const originalPath = KaercherRCV5ValetudoRobot.IDENTITY_PATH;
+
+        afterEach(() => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = originalPath;
+            try {
+                fs.unlinkSync(scratchPath);
+            } catch (e) {
+                // Nothing to clean up if a test never wrote it.
+            }
+        });
+
+        it("readKnownIdentity returns {} when no identity file exists yet", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            assert.deepStrictEqual(robot.readKnownIdentity(), {});
+        });
+
+        it("persistIdentity writes sn/mac, and readKnownIdentity reads them back", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            robot.persistIdentity("SG12345678", "AA:BB:CC:DD:EE:FF");
+
+            assert.deepStrictEqual(robot.readKnownIdentity(), {sn: "SG12345678", mac: "AA:BB:CC:DD:EE:FF"});
         });
     });
 });

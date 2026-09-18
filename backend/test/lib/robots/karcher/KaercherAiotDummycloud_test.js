@@ -18,6 +18,32 @@ describe("KaercherAiotDummycloud", () => {
         });
     });
 
+    describe("SN_FROM_CLIENT_ID", () => {
+        it("extracts sn from a well-formed client id", () => {
+            const sn = KaercherAiotDummycloud.SN_FROM_CLIENT_ID(`${KaercherAiotDummycloud.TENANT_ID}-SG12345678`);
+
+            assert.strictEqual(sn, "SG12345678");
+        });
+
+        it("splits on the last '-' in case the prefix itself contains one", () => {
+            const sn = KaercherAiotDummycloud.SN_FROM_CLIENT_ID("foo-bar-SG12345678");
+
+            assert.strictEqual(sn, "SG12345678");
+        });
+
+        it("returns null for a client id with no '-'", () => {
+            const sn = KaercherAiotDummycloud.SN_FROM_CLIENT_ID("SG12345678");
+
+            assert.strictEqual(sn, null);
+        });
+
+        it("returns null for a non-string input", () => {
+            const sn = KaercherAiotDummycloud.SN_FROM_CLIENT_ID(undefined);
+
+            assert.strictEqual(sn, null);
+        });
+    });
+
     describe("BUILD_DEVICE_TOPIC", () => {
         it("matches adapter.py's _device_topic() shape", () => {
             const topic = KaercherAiotDummycloud.BUILD_DEVICE_TOPIC("SG12345678", "service_invoke/start_station_act");

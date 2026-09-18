@@ -3,5 +3,6 @@ module.exports = {
     KaercherConsumableMonitoringCapability: require("./KaercherConsumableMonitoringCapability"),
     KaercherFanSpeedControlCapability: require("./KaercherFanSpeedControlCapability"),
     KaercherMapSegmentationCapability: require("./KaercherMapSegmentationCapability"),
+    KaercherOperationModeControlCapability: require("./KaercherOperationModeControlCapability"),
     KaercherWaterUsageControlCapability: require("./KaercherWaterUsageControlCapability")
 };

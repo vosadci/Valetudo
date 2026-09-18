@@ -20,6 +20,14 @@ class KaercherAiotDummycloud {
      * @param {(dir: string, body: Buffer) => void} [options.onSpecificUseUpload] called with
      *   the raw PUT body whenever the robot uploads a devlog or map object via the
      *   storage.specific_use_url/getAccessUrl flow
+     * @param {(sn: string, mac: string) => void} [options.onIdentityLearned] called whenever
+     *   a login provides both sn and mac, so the caller can persist them — sn/mac are
+     *   static per physical device, so persisting once and pre-seeding on next startup
+     *   (via knownSn/knownMac below) avoids depending on the robot redoing a login on
+     *   every reconnect, which it doesn't always do (cached MQTT sessions)
+     * @param {string} [options.knownSn] pre-seeds sn from a prior run, skipping the
+     *   window where commands would otherwise fail until a login/clientId is seen
+     * @param {string} [options.knownMac] pre-seeds mac from a prior run
      */
     constructor(options) {
         this.tlsContext = options.tlsContext;
@@ -27,6 +35,9 @@ class KaercherAiotDummycloud {
         this.onIncomingCloudMessage = options.onIncomingCloudMessage;
         this.onConnected = options.onConnected;
         this.onSpecificUseUpload = options.onSpecificUseUpload;
+        this.onIdentityLearned = options.onIdentityLearned;
+        this.sn = options.knownSn;
+        this.mac = options.knownMac;
 
         this.setupHTTP();
         this.setupMQTT();
@@ -47,6 +58,10 @@ class KaercherAiotDummycloud {
 
             this.sn = sn;
             this.mac = mac;
+
+            if (sn && mac) {
+                this.onIdentityLearned?.(sn, mac);
+            }
 
             Logger.info(`KaercherAiotDummycloud: handling device login for sn=${sn}`);
 
@@ -157,7 +172,21 @@ class KaercherAiotDummycloud {
             tlsContext: this.tlsContext,
             bindIP: this.bindIP,
             port: KaercherAiotDummycloud.MQTT_PORT,
-            onConnected: () => this.onConnected?.(),
+            onConnected: (clientId) => {
+                // Learn sn from the MQTT client ID (confirmed shape from live capture
+                // and doc/PROTOCOL.md: "{tenantId}-{sn}", e.g.
+                // "1528983614213726208-12696400029226") rather than relying solely on
+                // a prior HTTP login. A cached-session MQTT reconnect can skip login
+                // entirely — live-confirmed 2026-09-18: a Valetudo restart left `sn`
+                // unknown because the robot's own aiot_client just reconnected MQTT
+                // without redoing HTTP login, breaking every publishCommand() call
+                // (map refresh, start/stop/pause, fan speed, etc.) until this fix.
+                const clientIdSn = KaercherAiotDummycloud.SN_FROM_CLIENT_ID(clientId);
+                if (clientIdSn) {
+                    this.sn = clientIdSn;
+                }
+                this.onConnected?.();
+            },
             onPublish: (topic, payload) => {
                 // The robot is authoritative about its own sn — every topic it publishes
                 // already contains it, so learn it from traffic rather than relying solely
@@ -233,6 +262,25 @@ class KaercherAiotDummycloud {
 KaercherAiotDummycloud.SN_FROM_TOPIC = function(topic) {
     const match = /^\/mqtt\/[^/]+\/([^/]+)\/thing\//.exec(topic);
     return match ? match[1] : null;
+};
+
+/**
+ * Extracts sn from an MQTT client ID of the shape "{tenantId}-{sn}", e.g.
+ * "1528983614213726208-12696400029226" (tenantId confirmed static per-account in
+ * doc/PROTOCOL.md; sn confirmed by live capture matching the same device's HTTP
+ * login sn). Split on the *last* "-" defensively, in case tenantId itself ever
+ * contains one.
+ *
+ * @param {string} clientId
+ * @return {string|null}
+ */
+KaercherAiotDummycloud.SN_FROM_CLIENT_ID = function(clientId) {
+    if (typeof clientId !== "string") {
+        return null;
+    }
+
+    const idx = clientId.lastIndexOf("-");
+    return idx === -1 ? null : clientId.slice(idx + 1);
 };
 
 /**

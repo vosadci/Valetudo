@@ -40,10 +40,13 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
         if (this.config.get("embedded") === true) {
             const cert = fs.readFileSync(KaercherRCV5ValetudoRobot.CERT_PATH, "utf8");
             const key = fs.readFileSync(KaercherRCV5ValetudoRobot.KEY_PATH, "utf8");
+            const knownIdentity = this.readKnownIdentity();
 
             this.dummycloud = new KaercherAiotDummycloud({
                 tlsContext: new KaercherStaticTLSContext({cert: cert, key: key}),
                 bindIP: KaercherRCV5ValetudoRobot.BIND_IP,
+                knownSn: knownIdentity.sn,
+                knownMac: knownIdentity.mac,
                 onConnected: () => {
                     // Mirrors what the real cloud does per project_rcv5_valetudo_step7_live_confirmed
                     // memory: it doesn't matter whether this re-serves an existing map or
@@ -51,14 +54,33 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
                     this.sendServiceInvoke("upload_by_maptype", {map_type: 0}).catch(e => {
                         Logger.warn("KaercherRCV5ValetudoRobot: failed to request a map refresh", e);
                     });
+                    // Without this, state only ever reflects whatever the robot happens to
+                    // push unprompted — confirmed live 2026-09-18 that fields like `water`
+                    // can go an entire session without ever being pushed, leaving
+                    // WaterUsageControlCapability's WebUI widget stuck on "Error loading"
+                    // (no PresetSelectionStateAttribute had ever been set). The real app
+                    // does exactly this request on every connect (karcher-home's
+                    // request_device_update()) — mirrored here for the same reason.
+                    this.sendPropertyGet().catch(e => {
+                        Logger.warn("KaercherRCV5ValetudoRobot: failed to request a full property snapshot", e);
+                    });
                 },
                 onIncomingCloudMessage: (topic, envelope) => {
                     if (envelope?.method === "prop.post" && envelope.params) {
                         this.parseAndUpdateState(envelope.params);
+                    } else if (topic.endsWith("/service/property/get_reply") && envelope?.code === 0 && envelope.data) {
+                        // Reply to sendPropertyGet() — a different envelope shape entirely
+                        // ({code, data}, not {method, params}), confirmed against
+                        // karcher-home's own _process_mqtt_message()/_update_device_properties(),
+                        // which dispatches purely by topic rather than by any method field.
+                        this.parseAndUpdateState(envelope.data);
                     }
                 },
                 onSpecificUseUpload: (dir, body) => {
                     this.handleSpecificUseUpload(dir, body);
+                },
+                onIdentityLearned: (sn, mac) => {
+                    this.persistIdentity(sn, mac);
                 }
             });
         }
@@ -67,6 +89,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             capabilities.KaercherBasicControlCapability,
             capabilities.KaercherFanSpeedControlCapability,
             capabilities.KaercherWaterUsageControlCapability,
+            capabilities.KaercherOperationModeControlCapability,
             capabilities.KaercherConsumableMonitoringCapability,
             capabilities.KaercherMapSegmentationCapability
         ].forEach(capability => {
@@ -83,6 +106,40 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
 
         if (this.dummycloud) {
             await this.dummycloud.shutdown();
+        }
+    }
+
+    /**
+     * sn/mac are static per physical device — persisting them once means every
+     * later restart already knows both, regardless of whether the robot's
+     * aiot_client redoes a full HTTP login or just reconnects MQTT with a cached
+     * session (confirmed live 2026-09-18 that it doesn't always redo the login).
+     * Without this, mac specifically has no other recovery path at all (unlike
+     * sn, it isn't derivable from MQTT traffic), so map decryption would keep
+     * silently failing until the next real login happened to occur.
+     *
+     * @protected
+     * @return {{sn?: string, mac?: string}}
+     */
+    readKnownIdentity() {
+        try {
+            return JSON.parse(fs.readFileSync(KaercherRCV5ValetudoRobot.IDENTITY_PATH, "utf8"));
+        } catch (e) {
+            Logger.info("KaercherRCV5ValetudoRobot: no persisted device identity yet", e.message);
+            return {};
+        }
+    }
+
+    /**
+     * @protected
+     * @param {string} sn
+     * @param {string} mac
+     */
+    persistIdentity(sn, mac) {
+        try {
+            fs.writeFileSync(KaercherRCV5ValetudoRobot.IDENTITY_PATH, JSON.stringify({sn: sn, mac: mac}));
+        } catch (e) {
+            Logger.warn("KaercherRCV5ValetudoRobot: failed to persist device identity", e);
         }
     }
 
@@ -142,6 +199,21 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
     }
 
     /**
+     * Requests a full property snapshot. Ported verbatim from the installed
+     * `karcher-home` package's `request_device_update()`: topic
+     * `service/property/get`, method `prop.get`, version "3.0" (distinct from
+     * prop.set's "1.0"), params `{property: [...]}`. The robot replies on
+     * `service/property/get_reply` with a `{code, data}` envelope — handled
+     * separately in the constructor's onIncomingCloudMessage, not the {method,
+     * params} shape prop.post/service_invoke_reply use.
+     *
+     * @return {Promise<void>}
+     */
+    async sendPropertyGet() {
+        return this.dummycloud.publishCommand("service/property/get", "prop.get", {property: KaercherConst.ROBOT_PROPERTIES}, "3.0");
+    }
+
+    /**
      * @param {object} data flat property object from a prop.post push — may be partial
      */
     parseAndUpdateState(data) {
@@ -196,6 +268,15 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
                 value: KaercherConst.WATER_TO_PRESET[data.water] ?? stateAttrs.PresetSelectionStateAttribute.INTENSITY.CUSTOM,
                 customValue: KaercherConst.WATER_TO_PRESET[data.water] === undefined ? data.water : undefined,
                 metaData: {rawValue: data.water}
+            }));
+        }
+
+        if (data.mode !== undefined) {
+            this.state.upsertFirstMatchingAttribute(new stateAttrs.PresetSelectionStateAttribute({
+                type: stateAttrs.PresetSelectionStateAttribute.TYPE.OPERATION_MODE,
+                value: KaercherConst.MODE_TO_PRESET[data.mode] ?? stateAttrs.PresetSelectionStateAttribute.INTENSITY.CUSTOM,
+                customValue: KaercherConst.MODE_TO_PRESET[data.mode] === undefined ? data.mode : undefined,
+                metaData: {rawValue: data.mode}
             }));
         }
 
@@ -266,6 +347,9 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
 // local/karcher-dev-certs/{server_v1.crt,server.key}).
 KaercherRCV5ValetudoRobot.CERT_PATH = "/userdata/karcher-dev-certs/server_v1.crt";
 KaercherRCV5ValetudoRobot.KEY_PATH = "/userdata/karcher-dev-certs/server.key";
+// Persisted sn/mac, learned once from a real HTTP login and reused on every later
+// restart — see readKnownIdentity()/persistIdentity() above for why this exists.
+KaercherRCV5ValetudoRobot.IDENTITY_PATH = "/userdata/karcher-dev-certs/device-identity.json";
 // Defaults to the real on-device loopback-alias bind (see KaercherAiotDummycloud.BIND_IP's
 // own comment) — only correct once Valetudo actually runs ON the robot. Dev-Mac test
 // harnesses running Valetudo remotely need to override this to "0.0.0.0" instead, the
