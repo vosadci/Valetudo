@@ -30,7 +30,8 @@ describe("KaercherRCV5ValetudoRobot", () => {
                 "MapSegmentationCapability",
                 "OperationModeControlCapability",
                 "WaterUsageControlCapability"
-            ]
+            ],
+            "AutoEmptyDockManualTriggerCapability must stay absent until hasAutoEmptyDock is persisted true"
         );
         assert.strictEqual(robot.dummycloud, undefined);
     });
@@ -75,6 +76,80 @@ describe("KaercherRCV5ValetudoRobot", () => {
         assert.strictEqual(fanSpeed.value, "max");
         assert.strictEqual(waterGrade.value, "high");
         assert.strictEqual(operationMode.value, "vacuum_and_mop");
+    });
+
+    it("maps dust_action pushes onto DockStatusStateAttribute", () => {
+        const robot = buildRobot();
+
+        robot.parseAndUpdateState({dust_action: 2});
+        let dockStatus = robot.state.getFirstMatchingAttribute({attributeClass: "DockStatusStateAttribute"});
+        assert.strictEqual(dockStatus.value, "emptying");
+
+        robot.parseAndUpdateState({dust_action: 0});
+        dockStatus = robot.state.getFirstMatchingAttribute({attributeClass: "DockStatusStateAttribute"});
+        assert.strictEqual(dockStatus.value, "idle");
+    });
+
+    describe("auto-empty dock capability gating", () => {
+        // Regression coverage: CapabilitiesRouter and RobotMqttHandle both build
+        // their route/handle trees once, from this.capabilities at THEIR OWN
+        // startup — so a capability registered later, from a live
+        // charge_station_type push, would silently 404 on its action endpoint
+        // despite appearing to exist. The only correct place to decide is the
+        // constructor, from a persisted value learned on a previous run.
+        const scratchPath = path.join(os.tmpdir(), `karcher-auto-empty-test-${process.pid}.json`);
+        const originalPath = KaercherRCV5ValetudoRobot.IDENTITY_PATH;
+
+        afterEach(() => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = originalPath;
+            try {
+                fs.unlinkSync(scratchPath);
+            } catch (e) {
+                // Nothing to clean up if a test never wrote it.
+            }
+        });
+
+        it("does not register the capability when no station presence was ever persisted", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            assert.strictEqual(robot.capabilities.AutoEmptyDockManualTriggerCapability, undefined);
+        });
+
+        it("registers the capability when hasAutoEmptyDock: true was persisted by a previous run", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            fs.writeFileSync(scratchPath, JSON.stringify({hasAutoEmptyDock: true}));
+
+            const robot = buildRobot();
+
+            assert.notStrictEqual(robot.capabilities.AutoEmptyDockManualTriggerCapability, undefined);
+        });
+
+        it("does not register the capability when hasAutoEmptyDock: false was persisted", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            fs.writeFileSync(scratchPath, JSON.stringify({hasAutoEmptyDock: false}));
+
+            const robot = buildRobot();
+
+            assert.strictEqual(robot.capabilities.AutoEmptyDockManualTriggerCapability, undefined);
+        });
+
+        it("persists charge_station_type as hasAutoEmptyDock without clobbering sn/mac", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            fs.writeFileSync(scratchPath, JSON.stringify({sn: "SG12345678", mac: "AA:BB:CC:DD:EE:FF"}));
+            const robot = buildRobot();
+
+            robot.parseAndUpdateState({charge_station_type: 1});
+
+            assert.deepStrictEqual(robot.readKnownIdentity(), {
+                sn: "SG12345678",
+                mac: "AA:BB:CC:DD:EE:FF",
+                hasAutoEmptyDock: true
+            });
+
+            robot.parseAndUpdateState({charge_station_type: 0});
+            assert.strictEqual(robot.readKnownIdentity().hasAutoEmptyDock, false);
+        });
     });
 
     describe("IMPLEMENTATION_AUTO_DETECTION_HANDLER", () => {

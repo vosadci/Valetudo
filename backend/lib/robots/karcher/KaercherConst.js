@@ -152,7 +152,11 @@ const ROBOT_PROPERTIES = Object.freeze([
     "privacy", "alarm", "volume", "tank_state", "cloth_state", "mop_route",
     "map_num", "language", "voice_type", "quiet_status", "quiet_is_open",
     // Not part of the real app's own request list — see comment above.
-    "main_brush", "side_brush", "hypa", "mop_life"
+    "main_brush", "side_brush", "hypa", "mop_life",
+    // Suction Station RCV 5 fields (project_auto_empty_dock memory, device-confirmed
+    // 2026-08-04) — also not part of the app's own list, same untested-extension
+    // reasoning as the consumable fields above.
+    "dust_action", "charge_station_type"
 ]);
 
 module.exports = {

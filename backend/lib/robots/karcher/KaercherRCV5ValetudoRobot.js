@@ -37,10 +37,11 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             mop_life: undefined
         };
 
+        const knownIdentity = this.readKnownIdentity();
+
         if (this.config.get("embedded") === true) {
             const cert = fs.readFileSync(KaercherRCV5ValetudoRobot.CERT_PATH, "utf8");
             const key = fs.readFileSync(KaercherRCV5ValetudoRobot.KEY_PATH, "utf8");
-            const knownIdentity = this.readKnownIdentity();
 
             this.dummycloud = new KaercherAiotDummycloud({
                 tlsContext: new KaercherStaticTLSContext({cert: cert, key: key}),
@@ -85,14 +86,33 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             });
         }
 
-        [
+        // Static across restarts, same reasoning as sn/mac persistence above: the
+        // Suction Station RCV 5 is a physically-attached accessory, sold separately
+        // (project_auto_empty_dock memory), so whether it's present doesn't change
+        // within a boot session. Deciding this HERE, synchronously from the last
+        // persisted value, is required, not just convenient — WebServer's
+        // CapabilitiesRouter and MQTT's RobotMqttHandle both build their route/handle
+        // trees once from `this.capabilities` at their own startup (confirmed by
+        // reading both), so registering the capability later from a live
+        // charge_station_type push would silently 404 on every actual action
+        // endpoint despite appearing to exist.
+        this.knownHasAutoEmptyDock = knownIdentity.hasAutoEmptyDock;
+
+        /** @type {Array<new (options: {robot: KaercherRCV5ValetudoRobot}) => import("../../core/capabilities/Capability")>} */
+        const capabilitiesToRegister = [
             capabilities.KaercherBasicControlCapability,
             capabilities.KaercherFanSpeedControlCapability,
             capabilities.KaercherWaterUsageControlCapability,
             capabilities.KaercherOperationModeControlCapability,
             capabilities.KaercherConsumableMonitoringCapability,
             capabilities.KaercherMapSegmentationCapability
-        ].forEach(capability => {
+        ];
+
+        if (this.knownHasAutoEmptyDock === true) {
+            capabilitiesToRegister.push(capabilities.KaercherAutoEmptyDockManualTriggerCapability);
+        }
+
+        capabilitiesToRegister.forEach(capability => {
             this.registerCapability(new capability({robot: this}));
         });
 
@@ -119,7 +139,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
      * silently failing until the next real login happened to occur.
      *
      * @protected
-     * @return {{sn?: string, mac?: string}}
+     * @return {{sn?: string, mac?: string, hasAutoEmptyDock?: boolean}}
      */
     readKnownIdentity() {
         try {
@@ -136,10 +156,35 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
      * @param {string} mac
      */
     persistIdentity(sn, mac) {
+        this.persistDeviceState({sn: sn, mac: mac});
+    }
+
+    /**
+     * @protected
+     * @param {boolean} present
+     */
+    persistStationPresence(present) {
+        this.persistDeviceState({hasAutoEmptyDock: present});
+    }
+
+    /**
+     * Merges into the persisted file rather than overwriting it outright — sn/mac
+     * and hasAutoEmptyDock are learned independently, at different times, and
+     * neither should wipe the other out.
+     *
+     * @protected
+     * @param {object} patch
+     */
+    persistDeviceState(patch) {
         try {
-            fs.writeFileSync(KaercherRCV5ValetudoRobot.IDENTITY_PATH, JSON.stringify({sn: sn, mac: mac}));
+            const current = this.readKnownIdentity();
+
+            fs.writeFileSync(
+                KaercherRCV5ValetudoRobot.IDENTITY_PATH,
+                JSON.stringify(Object.assign({}, current, patch))
+            );
         } catch (e) {
-            Logger.warn("KaercherRCV5ValetudoRobot: failed to persist device identity", e);
+            Logger.warn("KaercherRCV5ValetudoRobot: failed to persist device state", e);
         }
     }
 
@@ -280,6 +325,28 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             }));
         }
 
+        if (data.charge_station_type !== undefined) {
+            const hasStation = data.charge_station_type !== 0;
+
+            if (this.knownHasAutoEmptyDock !== hasStation) {
+                this.knownHasAutoEmptyDock = hasStation;
+                this.persistStationPresence(hasStation);
+            }
+        }
+
+        if (data.dust_action !== undefined) {
+            // Suction Station RCV 5: dust_action cycles 0 (idle) -> 2 (emptying) -> 0
+            // over ~20s (device-confirmed, karcher-rcv5-ha's project_auto_empty_dock
+            // memory). `1` has never been observed. station_act is deliberately NOT
+            // used here — it stays 0 throughout a real empty cycle on this hardware.
+            this.state.upsertFirstMatchingAttribute(new stateAttrs.DockStatusStateAttribute({
+                value: data.dust_action === 2 ?
+                    stateAttrs.DockStatusStateAttribute.VALUE.EMPTYING :
+                    stateAttrs.DockStatusStateAttribute.VALUE.IDLE,
+                metaData: {rawValue: data.dust_action}
+            }));
+        }
+
         this.emitStateAttributesUpdated();
     }
 
@@ -342,14 +409,15 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
     }
 }
 
-// Provisional — not yet the final on-device deployment path (that's a later build
-// step; these currently match the dev-test harness at
-// local/karcher-dev-certs/{server_v1.crt,server.key}).
-KaercherRCV5ValetudoRobot.CERT_PATH = "/userdata/karcher-dev-certs/server_v1.crt";
-KaercherRCV5ValetudoRobot.KEY_PATH = "/userdata/karcher-dev-certs/server.key";
-// Persisted sn/mac, learned once from a real HTTP login and reused on every later
-// restart — see readKnownIdentity()/persistIdentity() above for why this exists.
-KaercherRCV5ValetudoRobot.IDENTITY_PATH = "/userdata/karcher-dev-certs/device-identity.json";
+// On-device deployment path — everything Valetudo-owned lives under one directory
+// (binary, config, log, certs, identity file), consolidated 2026-09-18. The dev-test
+// harness at local/karcher-dev-certs/{server_v1.crt,server.key} is the source these
+// get copied from, not where they run from on the robot.
+KaercherRCV5ValetudoRobot.CERT_PATH = "/userdata/valetudo/server_v1.crt";
+KaercherRCV5ValetudoRobot.KEY_PATH = "/userdata/valetudo/server.key";
+// Persisted sn/mac/hasAutoEmptyDock, learned once and reused on every later restart —
+// see readKnownIdentity()/persistDeviceState() above for why this exists.
+KaercherRCV5ValetudoRobot.IDENTITY_PATH = "/userdata/valetudo/device-identity.json";
 // Defaults to the real on-device loopback-alias bind (see KaercherAiotDummycloud.BIND_IP's
 // own comment) — only correct once Valetudo actually runs ON the robot. Dev-Mac test
 // harnesses running Valetudo remotely need to override this to "0.0.0.0" instead, the

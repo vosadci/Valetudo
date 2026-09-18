@@ -1,4 +1,5 @@
 module.exports = {
+    KaercherAutoEmptyDockManualTriggerCapability: require("./KaercherAutoEmptyDockManualTriggerCapability"),
     KaercherBasicControlCapability: require("./KaercherBasicControlCapability"),
     KaercherConsumableMonitoringCapability: require("./KaercherConsumableMonitoringCapability"),
     KaercherFanSpeedControlCapability: require("./KaercherFanSpeedControlCapability"),
