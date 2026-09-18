@@ -15,6 +15,19 @@ const WORK_MODE_SETS = Object.freeze({
 });
 
 /**
+ * doc/PROTOCOL.md §5 "Area (zone) cleaning": the zone-clean lifecycle family within
+ * work_mode — {30 cleaning, 31 paused, 32 returning}, a subset of the generic
+ * CLEANING/PAUSE/GO_HOME sets above. Pause/resume/stop must route through
+ * `set_zone_clean` rather than `set_room_clean` while work_mode is one of these — the
+ * app decides this the same way (`IotBase.getCleanMode == 6`). Deliberately excludes
+ * 35 (idle): unlike the HA integration (which also treats idle as zone-eligible to
+ * recover a "resume" intent across its own restarts), this capability has no
+ * cross-restart session state to recover, so idle here just means "nothing active,
+ * route normally."
+ */
+const ZONE_WORK_MODES = Object.freeze([30, 31, 32]);
+
+/**
  * doc/PROTOCOL.md §5 "Set suction power (fan speed)": wind 0-3, confirmed via traffic
  * capture. Mapped onto Valetudo's INTENSITY ladder the same way Viomi's 4-level fan
  * speed does (LOW/MEDIUM/HIGH/MAX) — see ViomiCommonAttributes.js.
@@ -161,6 +174,7 @@ const ROBOT_PROPERTIES = Object.freeze([
 
 module.exports = {
     WORK_MODE_SETS: WORK_MODE_SETS,
+    ZONE_WORK_MODES: ZONE_WORK_MODES,
     WIND_TO_PRESET: WIND_TO_PRESET,
     PRESET_TO_WIND: PRESET_TO_WIND,
     WATER_TO_PRESET: WATER_TO_PRESET,

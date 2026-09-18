@@ -34,7 +34,10 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             main_brush: undefined,
             side_brush: undefined,
             hypa: undefined,
-            mop_life: undefined
+            mop_life: undefined,
+            // Needed by KaercherMapSegmentationCapability's set_preference calls
+            // (doc/PROTOCOL.md §14) — the preference table is keyed per map_id.
+            current_map_id: undefined
         };
 
         const knownIdentity = this.readKnownIdentity();
@@ -105,7 +108,8 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             capabilities.KaercherWaterUsageControlCapability,
             capabilities.KaercherOperationModeControlCapability,
             capabilities.KaercherConsumableMonitoringCapability,
-            capabilities.KaercherMapSegmentationCapability
+            capabilities.KaercherMapSegmentationCapability,
+            capabilities.KaercherZoneCleaningCapability
         ];
 
         if (this.knownHasAutoEmptyDock === true) {
@@ -273,7 +277,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
                 statusRelevant = true;
             }
         }
-        for (const key of ["main_brush", "side_brush", "hypa", "mop_life"]) {
+        for (const key of ["main_brush", "side_brush", "hypa", "mop_life", "current_map_id"]) {
             if (data[key] !== undefined) {
                 this.ephemeralState[key] = data[key];
             }
@@ -356,6 +360,39 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
      */
     getBatteryFlag() {
         return KaercherStateDerivation.deriveBatteryFlag(this.ephemeralState);
+    }
+
+    /**
+     * doc/PROTOCOL.md §5 "Area (zone) cleaning" — see KaercherConst.ZONE_WORK_MODES'
+     * own comment for why idle is deliberately excluded here. Called from
+     * KaercherBasicControlCapability, not just internally.
+     *
+     * @return {boolean}
+     */
+    isZoneCleanActive() {
+        return KaercherConst.ZONE_WORK_MODES.includes(this.ephemeralState.work_mode);
+    }
+
+    /**
+     * Reads back the raw device value behind a currently-known preset attribute
+     * (stashed as metaData.rawValue whenever wind/water/mode pushes are parsed) —
+     * used by KaercherMapSegmentationCapability to carry the robot's current global
+     * mode/fan/water settings into a per-room set_preference write, since Valetudo's
+     * segment-clean action doesn't take per-segment mode/fan/water parameters itself.
+     *
+     * Called from KaercherMapSegmentationCapability, not just internally.
+     *
+     * @param {string} attributeType one of PresetSelectionStateAttribute.TYPE
+     * @param {number} fallback used only if this attribute has never been learned yet
+     * @return {number}
+     */
+    readCurrentRawValue(attributeType, fallback) {
+        const attribute = this.state.getFirstMatchingAttribute({
+            attributeClass: "PresetSelectionStateAttribute",
+            attributeType: attributeType
+        });
+
+        return attribute?.metaData?.rawValue ?? fallback;
     }
 
     /**

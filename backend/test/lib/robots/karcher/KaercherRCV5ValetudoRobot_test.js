@@ -29,7 +29,8 @@ describe("KaercherRCV5ValetudoRobot", () => {
                 "FanSpeedControlCapability",
                 "MapSegmentationCapability",
                 "OperationModeControlCapability",
-                "WaterUsageControlCapability"
+                "WaterUsageControlCapability",
+                "ZoneCleaningCapability"
             ],
             "AutoEmptyDockManualTriggerCapability must stay absent until hasAutoEmptyDock is persisted true"
         );
@@ -88,6 +89,44 @@ describe("KaercherRCV5ValetudoRobot", () => {
         robot.parseAndUpdateState({dust_action: 0});
         dockStatus = robot.state.getFirstMatchingAttribute({attributeClass: "DockStatusStateAttribute"});
         assert.strictEqual(dockStatus.value, "idle");
+    });
+
+    it("tracks current_map_id from prop.post pushes", () => {
+        const robot = buildRobot();
+
+        assert.strictEqual(robot.ephemeralState.current_map_id, undefined);
+        robot.parseAndUpdateState({current_map_id: 7});
+        assert.strictEqual(robot.ephemeralState.current_map_id, 7);
+    });
+
+    describe("isZoneCleanActive", () => {
+        it("is true only for the zone-clean work_mode family (30/31/32)", () => {
+            const robot = buildRobot();
+
+            for (const workMode of [30, 31, 32]) {
+                robot.ephemeralState.work_mode = workMode;
+                assert.strictEqual(robot.isZoneCleanActive(), true, `work_mode ${workMode}`);
+            }
+            for (const workMode of [undefined, 0, 1, 35]) {
+                robot.ephemeralState.work_mode = workMode;
+                assert.strictEqual(robot.isZoneCleanActive(), false, `work_mode ${workMode}`);
+            }
+        });
+    });
+
+    describe("readCurrentRawValue", () => {
+        it("returns the fallback when the attribute has never been learned", () => {
+            const robot = buildRobot();
+
+            assert.strictEqual(robot.readCurrentRawValue("fan_speed", 1), 1);
+        });
+
+        it("returns the cached rawValue once a wind/water/mode push has been seen", () => {
+            const robot = buildRobot();
+
+            robot.parseAndUpdateState({wind: 3});
+            assert.strictEqual(robot.readCurrentRawValue("fan_speed", 1), 3);
+        });
     });
 
     describe("auto-empty dock capability gating", () => {

@@ -184,7 +184,12 @@ class KaercherMapParser {
 
         return new mapEntities.ValetudoMap({
             metaData: {
-                vendorMapId: head.mapHeadId
+                vendorMapId: head.mapHeadId,
+                // Cached so a later zone-cleaning command can invert
+                // WORLD_TO_VALETUDO_PIXELS back to the robot's native world-metre
+                // coordinates for the map currently on screen — head/resolution are
+                // per-upload and don't survive past this function otherwise.
+                worldOrigin: {minX: head.minX, minY: head.minY, sizeY: head.sizeY, resolution: resolution}
             },
             size: {
                 x: width * KaercherMapParser.PIXEL_SIZE,
@@ -256,6 +261,27 @@ class KaercherMapParser {
         return {
             x: Math.round(col * KaercherMapParser.PIXEL_SIZE),
             y: Math.round((head.sizeY - rowFromBottom) * KaercherMapParser.PIXEL_SIZE)
+        };
+    }
+
+    /**
+     * Exact inverse of WORLD_TO_VALETUDO_PIXELS, for turning a zone the user drew on
+     * Valetudo's own map (cm, origin top-left, Y down) back into the robot's native
+     * world metres (origin bottom-left, Y up) for `set_zone_points`.
+     *
+     * @param {number} valetudoX cm
+     * @param {number} valetudoY cm
+     * @param {{minX: number, minY: number, sizeY: number, resolution: number}} worldOrigin
+     *   as cached on ValetudoMap.metaData.worldOrigin by BUILD_VALETUDO_MAP
+     * @return {{x: number, y: number}} world metres
+     */
+    static VALETUDO_PIXELS_TO_WORLD(valetudoX, valetudoY, worldOrigin) {
+        const col = valetudoX / KaercherMapParser.PIXEL_SIZE;
+        const rowFromBottom = worldOrigin.sizeY - (valetudoY / KaercherMapParser.PIXEL_SIZE);
+
+        return {
+            x: (col * worldOrigin.resolution) + worldOrigin.minX,
+            y: (rowFromBottom * worldOrigin.resolution) + worldOrigin.minY
         };
     }
 

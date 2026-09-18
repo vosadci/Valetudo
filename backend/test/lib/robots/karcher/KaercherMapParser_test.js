@@ -90,6 +90,31 @@ describe("KaercherMapParser", () => {
         });
     });
 
+    describe("VALETUDO_PIXELS_TO_WORLD", () => {
+        const head = {minX: -1.5, minY: 2, sizeY: 80};
+        const resolution = 0.05;
+
+        it("exactly inverts WORLD_TO_VALETUDO_PIXELS", () => {
+            for (const [worldX, worldY] of [[0, 0], [1.23, -4.56], [-1.5, 2], [3.7, 5.9]]) {
+                const valetudo = KaercherMapParser.WORLD_TO_VALETUDO_PIXELS(worldX, worldY, head, resolution);
+                const roundTripped = KaercherMapParser.VALETUDO_PIXELS_TO_WORLD(
+                    valetudo.x, valetudo.y, {minX: head.minX, minY: head.minY, sizeY: head.sizeY, resolution: resolution}
+                );
+
+                // WORLD_TO_VALETUDO_PIXELS rounds to whole cm, so the round trip is only
+                // exact to within one grid cell (resolution), not bit-for-bit.
+                assert.ok(
+                    Math.abs(roundTripped.x - worldX) <= resolution,
+                    `x: ${roundTripped.x} vs ${worldX}`
+                );
+                assert.ok(
+                    Math.abs(roundTripped.y - worldY) <= resolution,
+                    `y: ${roundTripped.y} vs ${worldY}`
+                );
+            }
+        });
+    });
+
     describe("BUILD_VALETUDO_MAP", () => {
         it("builds floor/wall/segment layers matching the documented byte table exactly", () => {
             const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
@@ -98,6 +123,7 @@ describe("KaercherMapParser", () => {
             assert.deepStrictEqual(map.size, {x: 20, y: 15});
             assert.strictEqual(map.pixelSize, 5);
             assert.strictEqual(map.metaData.vendorMapId, 42);
+            assert.deepStrictEqual(map.metaData.worldOrigin, {minX: 0, minY: 0, sizeY: 3, resolution: 0.05});
 
             assert.strictEqual(findLayer(map, "floor").dimensions.pixelCount, 3);
             assert.strictEqual(findLayer(map, "wall").dimensions.pixelCount, 2);

@@ -5,5 +5,6 @@ module.exports = {
     KaercherFanSpeedControlCapability: require("./KaercherFanSpeedControlCapability"),
     KaercherMapSegmentationCapability: require("./KaercherMapSegmentationCapability"),
     KaercherOperationModeControlCapability: require("./KaercherOperationModeControlCapability"),
-    KaercherWaterUsageControlCapability: require("./KaercherWaterUsageControlCapability")
+    KaercherWaterUsageControlCapability: require("./KaercherWaterUsageControlCapability"),
+    KaercherZoneCleaningCapability: require("./KaercherZoneCleaningCapability")
 };
