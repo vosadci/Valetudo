@@ -182,21 +182,38 @@ class KaercherAiotDummycloud {
     }
 
     /**
+     * @return {Promise<void>}
+     */
+    async shutdown() {
+        await new Promise((resolve) => {
+            this.httpServer.close(() => {
+                Logger.info("KaercherAiotDummycloud HTTPS server shut down");
+                resolve();
+            });
+        });
+
+        this.mqttServer.close();
+    }
+
+    /**
      * Publishes a command envelope to the robot.
      *
      * @param {string} suffix appended to the device topic, e.g. "service_invoke/start_station_act"
      * @param {string} method
      * @param {object} params
+     * @param {string} [version] doc/PROTOCOL.md §5: service_invoke commands use "3.0",
+     *   but prop.set (fan speed/water/cleaning mode, topic "service/property/set")
+     *   uses "1.0" — confirmed by live capture, not just convention.
      * @return {Promise<void>}
      */
-    publishCommand(suffix, method, params) {
+    publishCommand(suffix, method, params, version = "3.0") {
         if (!this.sn) {
             return Promise.reject(new Error("KaercherAiotDummycloud: cannot publish, sn not yet known (no traffic or login seen from the robot)"));
         }
 
         const sent = this.mqttServer.publish(
             KaercherAiotDummycloud.BUILD_DEVICE_TOPIC(this.sn, suffix),
-            KaercherAiotDummycloud.BUILD_ENVELOPE(method, params)
+            KaercherAiotDummycloud.BUILD_ENVELOPE(method, params, version)
         );
 
         if (!sent) {
@@ -234,14 +251,16 @@ KaercherAiotDummycloud.BUILD_DEVICE_TOPIC = function(sn, suffix) {
  *
  * @param {string} method
  * @param {object} params
+ * @param {string} [version] defaults to "3.0", the service_invoke shape — see
+ *   publishCommand's own default for why prop.set needs "1.0" instead.
  * @return {Buffer}
  */
-KaercherAiotDummycloud.BUILD_ENVELOPE = function(method, params) {
+KaercherAiotDummycloud.BUILD_ENVELOPE = function(method, params, version = "3.0") {
     return Buffer.from(JSON.stringify({
         method: method,
         msgId: String(Date.now()),
         tenantId: KaercherAiotDummycloud.TENANT_ID,
-        version: "3.0",
+        version: version,
         params: params
     }));
 };
