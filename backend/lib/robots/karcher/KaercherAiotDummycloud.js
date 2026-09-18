@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const express = require("express");
 const https = require("https");
 const KaercherMqtt5Server = require("./KaercherMqtt5Server");
@@ -16,12 +17,16 @@ class KaercherAiotDummycloud {
      * @param {string} options.bindIP
      * @param {(topic: string, envelope: object) => void} [options.onIncomingCloudMessage]
      * @param {() => void} [options.onConnected]
+     * @param {(dir: string, body: Buffer) => void} [options.onSpecificUseUpload] called with
+     *   the raw PUT body whenever the robot uploads a devlog or map object via the
+     *   storage.specific_use_url/getAccessUrl flow
      */
     constructor(options) {
         this.tlsContext = options.tlsContext;
         this.bindIP = options.bindIP;
         this.onIncomingCloudMessage = options.onIncomingCloudMessage;
         this.onConnected = options.onConnected;
+        this.onSpecificUseUpload = options.onSpecificUseUpload;
 
         this.setupHTTP();
         this.setupMQTT();
@@ -33,10 +38,11 @@ class KaercherAiotDummycloud {
         const app = express();
         // aiot_client's login POST isn't guaranteed to set Content-Type: application/json
         // (unconfirmed either way); match login_server.py's unconditional json.loads()
-        // rather than silently 200-ing with an empty body if it doesn't.
-        app.use(express.json({type: () => true}));
+        // rather than silently 200-ing with an empty body if it doesn't. Scoped per-route
+        // (not app.use()) because the upload PUT route below needs the raw body instead.
+        const jsonBody = express.json({type: () => true});
 
-        app.post("/device-service/auth/login", (req, res) => {
+        app.post("/device-service/auth/login", jsonBody, (req, res) => {
             const {sn = "", mac = "", tenantId = "", productModeCode = ""} = req.body ?? {};
 
             this.sn = sn;
@@ -65,6 +71,74 @@ class KaercherAiotDummycloud {
                     maxUpgradeTime: 30
                 }
             });
+        });
+
+        // Answered for both devlog (serviceType:4) and map (serviceType:2, temp/history)
+        // uploads — see project_rcv5_valetudo_step7_live_confirmed memory. aiot_client
+        // itself never inspects these fields, it just relays the whole reply to
+        // RobotApp over the local IPC socket. RobotApp DOES care: a live test this
+        // session showed it silently drops the upload (no curl attempt at all) when
+        // `cdnDomain` is empty — the real cloud always sends a non-empty one
+        // (`eu-cdnmapaiot.3irobotix.net` / `eu-cdndevlogaiot.3irobotix.net`), strongly
+        // suggesting RobotApp builds its actual upload target from cdnDomain+dir rather
+        // than blindly PUTing to `url`. Must be a hostname the device's /etc/hosts
+        // redirect actually covers — reusing req.hostname (rather than mimicking the
+        // real subdomain-per-purpose split) guarantees that, since it's by definition
+        // the hostname that just reached us.
+        app.post("/storage-management/storage/aws/getAccessUrl", jsonBody, (req, res) => {
+            const {dir = ""} = req.body ?? {};
+
+            Logger.debug(`KaercherAiotDummycloud: getAccessUrl for dir='${dir}'`);
+
+            res.status(200).json({
+                code: 0,
+                result: {
+                    accessid: "local",
+                    bucket: "local",
+                    bucketDomain: `https://${req.hostname}`,
+                    cdnDomain: req.hostname,
+                    dir: dir,
+                    expire: "32400000",
+                    host: "local",
+                    // Real cloud responses always use a purely numeric id (e.g.
+                    // "343813725915844608") — a UUID here was tried first and produced
+                    // a silent no-op on RobotApp's side (parsed fine as JSON, but no
+                    // upload was ever attempted), consistent with RobotApp parsing
+                    // this field as an integer somewhere downstream.
+                    id: KaercherAiotDummycloud.RANDOM_NUMERIC_ID(),
+                    policy: "",
+                    secret: "local",
+                    signature: "",
+                    // Real presigned URLs always carry an X-Amz-* query string; a bare
+                    // path (tried first) is a plausible reject point if RobotApp
+                    // expects/parses one. Cheap to match the shape even though our own
+                    // catch-all PUT route (below) only reads `dir` from the path and
+                    // ignores the query entirely.
+                    url: `https://${req.hostname}/${dir}?X-Amz-Algorithm=AWS4-HMAC-SHA256&x-id=PutObject`,
+                    urlType: "s3"
+                }
+            });
+        });
+
+        // The actual PUT the getAccessUrl reply above points at. Per step 7's live
+        // capture, aiot_client itself never performs this PUT — RobotApp does, and
+        // (per the cdnDomain finding above) may build the target URL itself from
+        // cdnDomain+dir rather than using `url` verbatim — so this can't assume a
+        // fixed path/query shape the way the first version did. Catches any PUT path
+        // and reads `dir` from the path itself instead. Body passed on as a raw
+        // Buffer, not decoded to a string here: karcher-home's decrypt_map() implies
+        // the S3 object content is base64 text, but that's inferred from a GET
+        // download path, never confirmed on a real PUT body — a wrong guess here
+        // would silently mangle binary data. Let the consumer decide.
+        app.put(/.*/, express.raw({type: () => true, limit: "5mb"}), (req, res) => {
+            const dir = decodeURIComponent(req.path.replace(/^\//, ""));
+            const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+
+            Logger.debug(`KaercherAiotDummycloud: received upload for dir='${dir}' (${body.length} bytes)`);
+
+            this.onSpecificUseUpload?.(dir, body);
+
+            res.status(200).send();
         });
 
         this.httpServer.on("request", app);
@@ -170,6 +244,20 @@ KaercherAiotDummycloud.BUILD_ENVELOPE = function(method, params) {
         version: "3.0",
         params: params
     }));
+};
+
+/**
+ * An 18-digit random numeric string, matching the shape of real getAccessUrl `id`
+ * values observed live (e.g. "343813725915844608").
+ *
+ * @return {string}
+ */
+KaercherAiotDummycloud.RANDOM_NUMERIC_ID = function() {
+    let id = "";
+    for (let i = 0; i < 18; i++) {
+        id += crypto.randomInt(0, 10);
+    }
+    return id;
 };
 
 KaercherAiotDummycloud.HTTP_PORT = 443;

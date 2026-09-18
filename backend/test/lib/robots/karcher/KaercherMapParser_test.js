@@ -1,0 +1,161 @@
+const assert = require("node:assert");
+const { describe, it } = require("node:test");
+
+const KaercherMapParser = require("../../../../lib/robots/karcher/KaercherMapParser");
+
+/**
+ * Synthetic 4x3 grid exercising every branch of doc/MAP_DATA.md §4.2's byte table
+ * (from the karcher-rcv5-ha repo), cross-checked against a real map fixture fetched
+ * via karcher-home this session — see project_rcv5_valetudo_step7_live_confirmed
+ * memory. Real byte values observed there (0, 1, 255, 10-14, 192-196) all appear
+ * here; the remaining ranges (deep-cleaned, cleaned-room, 128-146/197-252/254
+ * "unhandled") are exercised synthetically since the real fixture didn't happen to
+ * contain them.
+ *
+ * Grid (row-major, row 0 = world minY = image bottom per doc/MAP_DATA.md §5):
+ *   row 0: 0(skip)        1(floor)         255(wall)        10(segment 10, unvisited)
+ *   row 1: 65(segment 15, cleaned: 65-50)  192(segment 14, carpet: 206-192)  253(floor, carpet outside room)  3(wall, 3&3==3)
+ *   row 2: 130(skip, 128-146)  200(skip, 197-252)  254(skip)  2(floor, deep-cleaned: 2&3==2)
+ */
+function buildRobotMap() {
+    return {
+        mapHead: {
+            mapHeadId: 42,
+            sizeX: 4,
+            sizeY: 3,
+            minX: 0,
+            minY: 0,
+            maxX: 0.2,
+            maxY: 0.15,
+            resolution: 0.05
+        },
+        mapData: {
+            mapData: Buffer.from([
+                0, 1, 255, 10,
+                65, 192, 253, 3,
+                130, 200, 254, 2
+            ])
+        },
+        currentPose: {x: 0.1, y: 0.05, phi: 0}, // facing east
+        chargeStation: {x: 0.2, y: 0.15, phi: Math.PI / 2}, // facing north
+        historyPose: {
+            poseId: 1,
+            points: [{x: 0, y: 0}, {x: 0.05, y: 0}]
+        },
+        roomDataInfo: [
+            {roomId: 10, roomName: "Room A"},
+            {roomId: 14, roomName: "Room B"}
+            // roomId 15 intentionally absent, to cover the "no matching room" path
+        ]
+    };
+}
+
+function findLayer(map, type, segmentId) {
+    return map.layers.find(l => {
+        return l.type === type && (segmentId === undefined || l.metaData.segmentId === `${segmentId}`);
+    });
+}
+
+describe("KaercherMapParser", () => {
+    describe("DECODE_CELL", () => {
+        it("decodes every branch of the byte table", () => {
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(0), {kind: "skip"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(1), {kind: "floor"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(2), {kind: "floor"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(3), {kind: "wall"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(255), {kind: "wall"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(253), {kind: "floor"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(10), {kind: "segment", segmentId: 10});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(59), {kind: "segment", segmentId: 59});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(60), {kind: "segment", segmentId: 10});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(65), {kind: "segment", segmentId: 15});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(127), {kind: "segment", segmentId: 77});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(147), {kind: "segment", segmentId: 59});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(192), {kind: "segment", segmentId: 14});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(196), {kind: "segment", segmentId: 10});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(128), {kind: "skip"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(146), {kind: "skip"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(197), {kind: "skip"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(252), {kind: "skip"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(254), {kind: "skip"});
+        });
+    });
+
+    describe("PHI_TO_VALETUDO_ANGLE", () => {
+        it("maps world phi (0=east, CCW+) to Valetudo compass degrees (0=north, CW+)", () => {
+            assert.strictEqual(KaercherMapParser.PHI_TO_VALETUDO_ANGLE(0), 90); // east
+            assert.strictEqual(KaercherMapParser.PHI_TO_VALETUDO_ANGLE(Math.PI / 2), 0); // north
+            assert.strictEqual(KaercherMapParser.PHI_TO_VALETUDO_ANGLE(Math.PI), 270); // west
+            assert.strictEqual(KaercherMapParser.PHI_TO_VALETUDO_ANGLE(-Math.PI / 2), 180); // south
+        });
+    });
+
+    describe("BUILD_VALETUDO_MAP", () => {
+        it("builds floor/wall/segment layers matching the documented byte table exactly", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            assert.ok(map, "expected a ValetudoMap, got null");
+            assert.deepStrictEqual(map.size, {x: 20, y: 15});
+            assert.strictEqual(map.pixelSize, 5);
+            assert.strictEqual(map.metaData.vendorMapId, 42);
+
+            assert.strictEqual(findLayer(map, "floor").dimensions.pixelCount, 3);
+            assert.strictEqual(findLayer(map, "wall").dimensions.pixelCount, 2);
+
+            const seg10 = findLayer(map, "segment", 10);
+            assert.strictEqual(seg10.dimensions.pixelCount, 1);
+            assert.strictEqual(seg10.metaData.name, "Room A");
+
+            const seg14 = findLayer(map, "segment", 14);
+            assert.strictEqual(seg14.dimensions.pixelCount, 1);
+            assert.strictEqual(seg14.metaData.name, "Room B");
+
+            const seg15 = findLayer(map, "segment", 15);
+            assert.strictEqual(seg15.dimensions.pixelCount, 1);
+            assert.strictEqual(seg15.metaData.name, undefined, "segment 15 has no room_data_info entry");
+
+            assert.strictEqual(map.layers.length, 5); // floor, wall, 3 segments
+        });
+
+        it("places robot/charger entities and the history path using world->pixel conversion", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            const robot = map.entities.find(e => e.type === "robot_position");
+            assert.ok(robot);
+            assert.deepStrictEqual(robot.points, [10, 10]);
+            assert.strictEqual(robot.metaData.angle, 90); // facing east
+
+            const charger = map.entities.find(e => e.type === "charger_location");
+            assert.ok(charger);
+            assert.deepStrictEqual(charger.points, [20, 0]);
+            assert.strictEqual(charger.metaData.angle, 0); // facing north
+
+            const path = map.entities.find(e => e.type === "path");
+            assert.ok(path);
+            assert.deepStrictEqual(path.points, [0, 15, 5, 15]);
+        });
+
+        it("omits the charger entity when chargeStation is (0, 0) (not placed / unknown)", () => {
+            const robotMap = buildRobotMap();
+            robotMap.chargeStation = {x: 0, y: 0, phi: 0};
+
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(robotMap);
+
+            assert.strictEqual(map.entities.find(e => e.type === "charger_location"), undefined);
+        });
+
+        it("returns null when the grid payload length doesn't match sizeX*sizeY", () => {
+            const robotMap = buildRobotMap();
+            robotMap.mapData.mapData = Buffer.from([0, 1, 2]); // too short for 4x3
+
+            assert.strictEqual(KaercherMapParser.BUILD_VALETUDO_MAP(robotMap), null);
+        });
+
+        it("returns null when mapHead has non-positive dimensions", () => {
+            const robotMap = buildRobotMap();
+            robotMap.mapHead.sizeX = 0;
+
+            assert.strictEqual(KaercherMapParser.BUILD_VALETUDO_MAP(robotMap), null);
+        });
+    });
+});
