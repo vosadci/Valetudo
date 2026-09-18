@@ -1,8 +1,7 @@
 const express = require("express");
 const https = require("https");
+const KaercherMqtt5Server = require("./KaercherMqtt5Server");
 const Logger = require("../../Logger");
-const tls = require("tls");
-const {createBroker} = require("aedes");
 
 /**
  * Local stand-in for aiot_client.bin's real cloud (eu-cdndevaiot.3irobotix.net /
@@ -80,52 +79,31 @@ class KaercherAiotDummycloud {
     }
 
     setupMQTT() {
-        this.mqttBroker = createBroker();
-        this.mqttServer = tls.createServer(this.tlsContext.getTLSOptions(), this.mqttBroker.handle);
+        this.mqttServer = new KaercherMqtt5Server({
+            tlsContext: this.tlsContext,
+            bindIP: this.bindIP,
+            port: KaercherAiotDummycloud.MQTT_PORT,
+            onConnected: () => this.onConnected?.(),
+            onPublish: (topic, payload) => {
+                // The robot is authoritative about its own sn — every topic it publishes
+                // already contains it, so learn it from traffic rather than relying solely
+                // on the HTTP login body (login_server.py's login isn't guaranteed to
+                // precede every reconnect, e.g. a cached-token MQTT reconnect).
+                const topicSn = KaercherAiotDummycloud.SN_FROM_TOPIC(topic);
+                if (topicSn) {
+                    this.sn = topicSn;
+                }
 
-        this.mqttServer.listen(KaercherAiotDummycloud.MQTT_PORT, this.bindIP, () => {
-            Logger.info(`KaercherAiotDummycloud MQTT listening on ${this.bindIP}:${KaercherAiotDummycloud.MQTT_PORT}`);
-        });
+                let envelope;
+                try {
+                    envelope = JSON.parse(payload.toString());
+                } catch (e) {
+                    Logger.warn(`KaercherAiotDummycloud failed to parse incoming message on '${topic}'`, e);
+                    return;
+                }
 
-        this.mqttServer.on("error", (err) => {
-            Logger.error("KaercherAiotDummycloud MQTT Server Error:", err);
-        });
-
-        this.mqttBroker.on("client", (client) => {
-            Logger.info(`KaercherAiotDummycloud MQTT client connected: ${client.id}`);
-
-            this.onConnected?.();
-        });
-
-        this.mqttBroker.on("clientDisconnect", (client) => {
-            Logger.info(`KaercherAiotDummycloud MQTT client disconnected: ${client.id}`);
-        });
-
-        this.mqttBroker.on("publish", (packet, client) => {
-            if (!client) {
-                return; // messages without a client are our own outgoing publishCommand() calls
+                this.onIncomingCloudMessage?.(topic, envelope);
             }
-
-            Logger.trace(`KaercherAiotDummycloud MQTT message on '${packet.topic}':`, packet.payload.toString());
-
-            // The robot is authoritative about its own sn — every topic it publishes
-            // already contains it, so learn it from traffic rather than relying solely
-            // on the HTTP login body (login_server.py's login isn't guaranteed to
-            // precede every reconnect, e.g. a cached-token MQTT reconnect).
-            const topicSn = KaercherAiotDummycloud.SN_FROM_TOPIC(packet.topic);
-            if (topicSn) {
-                this.sn = topicSn;
-            }
-
-            let envelope;
-            try {
-                envelope = JSON.parse(packet.payload.toString());
-            } catch (e) {
-                Logger.warn(`KaercherAiotDummycloud failed to parse incoming message on '${packet.topic}'`, e);
-                return;
-            }
-
-            this.onIncomingCloudMessage?.(packet.topic, envelope);
         });
     }
 
@@ -142,22 +120,16 @@ class KaercherAiotDummycloud {
             return Promise.reject(new Error("KaercherAiotDummycloud: cannot publish, sn not yet known (no traffic or login seen from the robot)"));
         }
 
-        return new Promise((resolve, reject) => {
-            this.mqttBroker.publish({
-                cmd: "publish",
-                topic: KaercherAiotDummycloud.BUILD_DEVICE_TOPIC(this.sn, suffix),
-                payload: KaercherAiotDummycloud.BUILD_ENVELOPE(method, params),
-                qos: 0,
-                retain: false,
-                dup: false
-            }, (error) => {
-                if (error) {
-                    reject(error);
-                } else {
-                    resolve();
-                }
-            });
-        });
+        const sent = this.mqttServer.publish(
+            KaercherAiotDummycloud.BUILD_DEVICE_TOPIC(this.sn, suffix),
+            KaercherAiotDummycloud.BUILD_ENVELOPE(method, params)
+        );
+
+        if (!sent) {
+            return Promise.reject(new Error("KaercherAiotDummycloud: cannot publish, no MQTT client connected"));
+        }
+
+        return Promise.resolve();
     }
 }
 
