@@ -43,7 +43,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
 
             this.dummycloud = new KaercherAiotDummycloud({
                 tlsContext: new KaercherStaticTLSContext({cert: cert, key: key}),
-                bindIP: KaercherAiotDummycloud.BIND_IP,
+                bindIP: KaercherRCV5ValetudoRobot.BIND_IP,
                 onConnected: () => {
                     // Mirrors what the real cloud does per project_rcv5_valetudo_step7_live_confirmed
                     // memory: it doesn't matter whether this re-serves an existing map or
@@ -266,5 +266,11 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
 // local/karcher-dev-certs/{server_v1.crt,server.key}).
 KaercherRCV5ValetudoRobot.CERT_PATH = "/userdata/karcher-dev-certs/server_v1.crt";
 KaercherRCV5ValetudoRobot.KEY_PATH = "/userdata/karcher-dev-certs/server.key";
+// Defaults to the real on-device loopback-alias bind (see KaercherAiotDummycloud.BIND_IP's
+// own comment) — only correct once Valetudo actually runs ON the robot. Dev-Mac test
+// harnesses running Valetudo remotely need to override this to "0.0.0.0" instead, the
+// same way local/karcher-dev-certs/run_dummycloud.js already does for
+// KaercherAiotDummycloud directly.
+KaercherRCV5ValetudoRobot.BIND_IP = KaercherAiotDummycloud.BIND_IP;
 
 module.exports = KaercherRCV5ValetudoRobot;
