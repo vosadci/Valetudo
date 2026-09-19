@@ -134,10 +134,58 @@ const FAULT_MESSAGES = Object.freeze({
     2003: "No power / plan disabled",
     2007: "Cleaning interrupted",
     2010: "ToF sensor abnormal",
-    2100: "Return-to-dock interrupted",
-    2101: "Charging interrupted",
-    2106: "Charging-wait interrupted",
     4002: "Map error"
+});
+
+/**
+ * Lifecycle status codes the real app excludes from its error dialog (shown in a
+ * status text widget instead, e.g. "Self-checking", "Relocalizing"). Source:
+ * `ControlMainActivity.java`'s `isStatusNoThisFault()`, APK v1.4.32 — the exact
+ * set karcher-rcv5-ha's `NON_ERROR_FAULT_CODES` (const.py) ships and verified
+ * exhaustively there; ported verbatim rather than re-derived from doc/PROTOCOL.md's
+ * fault table, whose `*(status)*` row annotations turned out to be an incomplete
+ * subset of this (missing 2100/2101/2106/2111/2112/2118). A fault code in this set
+ * must never surface as the Error status, regardless of work_mode/docked state —
+ * correspondingly, none of them need a FAULT_MESSAGES entry, since buildRobotError()
+ * is never reached for them.
+ */
+const STATUS_ONLY_FAULT_CODES = Object.freeze(new Set([
+    2100, // FAULT_BROKEN_GO_HOME — return-to-dock interrupted
+    2101, // FAULT_BROKEN_CHARING — charging interrupted
+    2102, // FAULT_ROBOT_GLOBAL_GO_HOME — global return-to-dock in progress
+    2103, // FAULT_ROBOT_CHANGING — robot state changing
+    2104, // FAULT_ROBOT_USER_GO_HOME — user-initiated return to dock
+    2105, // FAULT_ROBOT_CHARGE_FINISH — charging complete
+    2106, // FAULT_BROKEN_CHARGING_WAIT — charging-wait interrupted
+    2107, // FAULT_GLOBAL_APPOINT_CLEAN — scheduled clean in progress
+    2108, // FAULT_ROBOT_RELOCALITION_ING — relocalizing
+    2109, // FAULT_ROBOT_REPEAT_CLEAN_ING — repeat cleaning in progress
+    2110, // FAULT_ROBOT_SELF_CHECK_ING — self-checking (startup self-test)
+    2111, // no named constant in RobotError.java
+    2112, // no named constant in RobotError.java
+    2118  // no named constant in RobotError.java
+]));
+
+/**
+ * Human-readable text for the subset of STATUS_ONLY_FAULT_CODES that have a named
+ * constant in RobotError.java. Ported verbatim from karcher-rcv5-ha's own shipped
+ * `strings.json`/`translations/en.json` (already-verified, user-facing English text),
+ * not re-translated here. Deliberately has no entries for 2111/2112/2118 — those have
+ * no named constant, so any text here would be a guess; they stay plain "idle" with
+ * no message, same as before this feature existed.
+ */
+const STATUS_MESSAGES = Object.freeze({
+    2100: "Return to dock interrupted",
+    2101: "Charging interrupted",
+    2102: "Returning to dock",
+    2103: "Changing state",
+    2104: "Returning to dock (user)",
+    2105: "Charging complete",
+    2106: "Charging wait interrupted",
+    2107: "Scheduled clean in progress",
+    2108: "Relocalizing",
+    2109: "Repeat cleaning in progress",
+    2110: "Self-checking"
 });
 
 /**
@@ -184,5 +232,7 @@ module.exports = {
     CONSUMABLE_FULL_LIFE_MINUTES: CONSUMABLE_FULL_LIFE_MINUTES,
     CONSUMABLE_RESET_IDS: CONSUMABLE_RESET_IDS,
     FAULT_MESSAGES: FAULT_MESSAGES,
+    STATUS_ONLY_FAULT_CODES: STATUS_ONLY_FAULT_CODES,
+    STATUS_MESSAGES: STATUS_MESSAGES,
     ROBOT_PROPERTIES: ROBOT_PROPERTIES
 };

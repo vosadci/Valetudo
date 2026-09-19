@@ -6,6 +6,10 @@ class StatusStateAttribute extends StateAttribute {
      * @param {StatusStateAttributeValue} options.value
      * @param {StatusStateAttributeFlag} [options.flag]
      * @param {import("../../core/ValetudoRobotError")} [options.error]
+     * @param {string} [options.message] Optional human-readable detail for a non-error
+     * value/flag combination that doesn't fit VALUE/FLAG's fixed enums on its own
+     * (e.g. "Self-checking", "Relocalizing") — vendor-supplied free text, analogous
+     * to error.message but for informational status rather than a fault.
      * @param {object} [options.metaData]
      */
     constructor(options) {
@@ -15,6 +19,7 @@ class StatusStateAttribute extends StateAttribute {
         this.flag = options.flag ?? StatusStateAttribute.FLAG.NONE;
 
         this.error = this.value === StatusStateAttribute.VALUE.ERROR ? options.error : undefined;
+        this.message = this.value !== StatusStateAttribute.VALUE.ERROR ? options.message : undefined;
     }
 
     get isActiveState() {

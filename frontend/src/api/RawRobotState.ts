@@ -32,6 +32,9 @@ export interface StatusState {
         | "manual_control"
         | "moving";
     flag: "none" | "zone" | "segment" | "spot" | "target" | "resumable";
+    // Optional vendor-supplied free text for a non-error value/flag combination
+    // that doesn't fit those fixed enums on its own (e.g. "Self-checking").
+    message?: string;
 }
 
 export interface BatteryState {

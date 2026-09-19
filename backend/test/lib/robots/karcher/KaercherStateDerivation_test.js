@@ -61,6 +61,45 @@ describe("KaercherStateDerivation", () => {
             assert.strictEqual(result.faultCode, undefined);
         });
 
+        it("does not report error for the app's documented status-only codes, even idle and undocked (isStatusNoThisFault() range, e.g. 2110 self-check)", () => {
+            for (const statusOnlyCode of [2100, 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109, 2110, 2111, 2112, 2118]) {
+                const result = KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: statusOnlyCode});
+
+                assert.strictEqual(result.value, "idle", `fault=${statusOnlyCode} should not report error`);
+                assert.strictEqual(result.faultCode, undefined);
+            }
+        });
+
+        it("surfaces a human-readable statusMessage for status-only codes with a named constant (e.g. 2110 self-check)", () => {
+            const result = KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: 2110});
+
+            assert.strictEqual(result.value, "idle");
+            assert.strictEqual(result.statusMessage, "Self-checking");
+        });
+
+        it("has no statusMessage for status-only codes with no named constant (2111/2112/2118)", () => {
+            for (const unnamedCode of [2111, 2112, 2118]) {
+                const result = KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: unnamedCode});
+
+                assert.strictEqual(result.value, "idle");
+                assert.strictEqual(result.statusMessage, undefined, `fault=${unnamedCode} should have no statusMessage`);
+            }
+        });
+
+        it("has no statusMessage for plain idle (fault: 0) or genuine errors", () => {
+            assert.strictEqual(KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: 0}).statusMessage, undefined);
+            assert.strictEqual(KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: 507}).statusMessage, undefined);
+        });
+
+        it("still reports error for genuine faults outside the status-only range (e.g. 2007/2010, just below 2100)", () => {
+            for (const genuineFaultCode of [2007, 2010]) {
+                const result = KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: genuineFaultCode});
+
+                assert.strictEqual(result.value, "error", `fault=${genuineFaultCode} should report error`);
+                assert.strictEqual(result.faultCode, genuineFaultCode);
+            }
+        });
+
         it("does not report error when work_mode is undefined (never seen a push yet)", () => {
             const result = KaercherStateDerivation.deriveStatus({fault: 507});
 

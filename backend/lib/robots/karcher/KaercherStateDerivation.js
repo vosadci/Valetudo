@@ -32,43 +32,54 @@ const stateAttrs = entities.state.attributes;
  *   if docked             → Docked
  *   else                  → Unknown (rendered as Idle in HA)
  * ```
- * docked := status === 4 || charge_state > 0. The 21xx "lifecycle notification"
- * fault codes are not special-cased here beyond what's already documented — they
- * coexist with active (non-idle) work_mode values in practice, so this tree
- * doesn't misclassify them without needing to enumerate them.
+ * docked := status === 4 || charge_state > 0. Codes in
+ * KaercherConst.STATUS_ONLY_FAULT_CODES (the documented 21xx lifecycle
+ * notifications, e.g. 2110 self-check) never promote to Error even when they
+ * coexist with an idle, undocked work_mode — which they do in practice, e.g. a
+ * self-check right after pickup, before the robot is back on the dock. Instead,
+ * when one of those codes has a known KaercherConst.STATUS_MESSAGES entry, it's
+ * surfaced as statusMessage — free text on the (non-error) status, so e.g.
+ * "Self-checking" is visible instead of the fault code just vanishing into a
+ * plain, indistinguishable "idle".
  *
  * @param {object} ephemeralState
- * @return {{value: import("../../entities/state/attributes/StatusStateAttribute").StatusStateAttributeValue, faultCode: number|undefined}}
+ * @return {{value: import("../../entities/state/attributes/StatusStateAttribute").StatusStateAttributeValue, faultCode: number|undefined, statusMessage: string|undefined}}
  */
 function deriveStatus(ephemeralState) {
     const {work_mode: workMode, status, charge_state: chargeState, fault} = ephemeralState;
     const docked = status === 4 || (typeof chargeState === "number" && chargeState > 0);
 
     if (workMode !== undefined && KaercherConst.WORK_MODE_SETS.CLEANING.includes(workMode)) {
-        return {value: stateAttrs.StatusStateAttribute.VALUE.CLEANING, faultCode: undefined};
+        return {value: stateAttrs.StatusStateAttribute.VALUE.CLEANING, faultCode: undefined, statusMessage: undefined};
     }
     if (workMode !== undefined && KaercherConst.WORK_MODE_SETS.GO_HOME.includes(workMode)) {
         return {
             value: docked ? stateAttrs.StatusStateAttribute.VALUE.DOCKED : stateAttrs.StatusStateAttribute.VALUE.RETURNING,
-            faultCode: undefined
+            faultCode: undefined,
+            statusMessage: undefined
         };
     }
     if (workMode !== undefined && KaercherConst.WORK_MODE_SETS.PAUSE.includes(workMode)) {
-        return {value: stateAttrs.StatusStateAttribute.VALUE.PAUSED, faultCode: undefined};
+        return {value: stateAttrs.StatusStateAttribute.VALUE.PAUSED, faultCode: undefined, statusMessage: undefined};
     }
     if (workMode !== undefined && KaercherConst.WORK_MODE_SETS.IDLE.includes(workMode)) {
         if (docked) {
-            return {value: stateAttrs.StatusStateAttribute.VALUE.DOCKED, faultCode: undefined};
+            return {value: stateAttrs.StatusStateAttribute.VALUE.DOCKED, faultCode: undefined, statusMessage: undefined};
         }
-        if (fault) {
-            return {value: stateAttrs.StatusStateAttribute.VALUE.ERROR, faultCode: fault};
+        if (fault && !KaercherConst.STATUS_ONLY_FAULT_CODES.has(fault)) {
+            return {value: stateAttrs.StatusStateAttribute.VALUE.ERROR, faultCode: fault, statusMessage: undefined};
         }
-        return {value: stateAttrs.StatusStateAttribute.VALUE.IDLE, faultCode: undefined};
+        return {
+            value: stateAttrs.StatusStateAttribute.VALUE.IDLE,
+            faultCode: undefined,
+            statusMessage: fault ? KaercherConst.STATUS_MESSAGES[fault] : undefined
+        };
     }
 
     return {
         value: docked ? stateAttrs.StatusStateAttribute.VALUE.DOCKED : stateAttrs.StatusStateAttribute.VALUE.IDLE,
-        faultCode: undefined
+        faultCode: undefined,
+        statusMessage: undefined
     };
 }
 

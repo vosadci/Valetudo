@@ -399,11 +399,12 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
      * @protected
      */
     updateStatusAttribute() {
-        const {value, faultCode} = KaercherStateDerivation.deriveStatus(this.ephemeralState);
+        const {value, faultCode, statusMessage} = KaercherStateDerivation.deriveStatus(this.ephemeralState);
 
         this.state.upsertFirstMatchingAttribute(new stateAttrs.StatusStateAttribute({
             value: value,
-            error: faultCode !== undefined ? this.buildRobotError(faultCode) : undefined
+            error: faultCode !== undefined ? this.buildRobotError(faultCode) : undefined,
+            message: statusMessage
         }));
     }
 
