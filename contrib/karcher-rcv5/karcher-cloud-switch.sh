@@ -50,6 +50,12 @@ HOST_B="eu-gamqttaiot.3irobotix.net"
 VALETUDO_IP="127.0.13.38"
 
 restart_aiot_client() {
+    # Opens aiot-gate.sh's boot gate before the kill, so wifi-deamon.sh is free to
+    # relaunch immediately. Reached only after the hosts/cert changes above are
+    # applied AND cmp-verified, which is exactly the point the gate waits for. A
+    # plain touch on an unpatched robot, so this is safe either way, and both modes
+    # want aiot_client running.
+    touch /tmp/valetudo_cloud_ready 2>/dev/null || true
     killall aiot_client.bin 2>/dev/null || true
     # wifi-deamon.sh's existing supervisor relaunches it; no separate start needed.
 }
@@ -157,6 +163,27 @@ switch_hosts() {
     mount -o bind "$1" /etc/hosts
 }
 
+# Fails fast, before either mode_* function touches anything, so a switch that
+# can't complete leaves the robot exactly as it was rather than half-applied.
+# Found live 2026-09-19: switch_hosts() runs before the cert cp steps below, and
+# has no dependency on /oem itself — so without this check, a boot where /oem
+# isn't writable (e.g. a factory reset cleared the aiot-gate.sh overlay's
+# /userdata/sys_debug_mode flag) would redirect /etc/hosts successfully, then
+# fail the cert cp with set -eu, leaving hosts pointed at the dummycloud with
+# stock certs still in place — neither real cloud nor working Valetudo works.
+require_oem_writable() {
+    probe="/oem/sysconf/.valetudo-rwtest.$$"
+    if touch "$probe" 2>/dev/null; then
+        rm -f "$probe"
+        return 0
+    fi
+    echo "ERROR: /oem is not writable — refusing to switch (nothing has been changed)." >&2
+    echo "This usually means the aiot-gate.sh overlay isn't armed, e.g. after a factory" >&2
+    echo "reset cleared /userdata/sys_debug_mode. Fix with: aiot-gate.sh overlay on," >&2
+    echo "then reboot, then retry this switch." >&2
+    exit 1
+}
+
 ensure_backups() {
     if [ ! -f "$HOSTS_BACKUP" ]; then
         cp /etc/hosts "$HOSTS_BACKUP"
@@ -187,6 +214,8 @@ mode_backup() {
 }
 
 mode_cloud() {
+    require_oem_writable
+
     if [ ! -f "$HOSTS_BACKUP" ] || [ ! -f "$CERT_BACKUP" ] || [ ! -f "$GDROOT_BACKUP" ]; then
         echo "no backup found under /userdata — nothing to restore, already stock?" >&2
         exit 1
@@ -210,6 +239,7 @@ mode_cloud() {
 }
 
 mode_valetudo() {
+    require_oem_writable
     ensure_backups
 
     if [ ! -f "$HOSTS_VALETUDO" ]; then

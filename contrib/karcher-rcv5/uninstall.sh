@@ -27,6 +27,12 @@ if ! ssh "${SSH_OPTS[@]}" "$REMOTE" '/userdata/valetudo/karcher-cloud-switch.sh 
     exit 1
 fi
 
+echo "== Reverting the wifi-deamon.sh aiot_client gate (if patched) =="
+ssh "${SSH_OPTS[@]}" "$REMOTE" '[ -x /userdata/valetudo/aiot-gate.sh ] || exit 0
+    grep -q "valetudo-gate BEGIN" /oem/bin/wifi-deamon.sh 2>/dev/null || exit 0
+    /userdata/valetudo/aiot-gate.sh unpatch' \
+    || echo "WARNING: could not revert the gate — check '/userdata/valetudo/aiot-gate.sh status' by hand" >&2
+
 echo "== Stopping Valetudo =="
 ssh "${SSH_OPTS[@]}" "$REMOTE" '/userdata/valetudo/S96valetudo stop' || true
 

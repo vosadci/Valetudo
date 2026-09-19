@@ -21,7 +21,7 @@ starting here.
 - **Python 3** with the `cryptography` package (`pip install cryptography`)
   — for generating the dev TLS certificate.
 - `ssh`/`scp` (already on macOS/Linux by default).
-- The robot's current LAN IP (DHCP-assigned, can change — confirm it before
+- The robot's current LAN IP (if DHCP-assigned, can change — confirm it before
   running anything if it's been a while).
 
 ## Getting the code
