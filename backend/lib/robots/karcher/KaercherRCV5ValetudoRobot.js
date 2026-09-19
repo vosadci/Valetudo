@@ -448,7 +448,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
 
 // On-device deployment path — everything Valetudo-owned lives under one directory
 // (binary, config, log, certs, identity file), consolidated 2026-09-18. The dev-test
-// harness at local/karcher-dev-certs/{server_v1.crt,server.key} is the source these
+// harness at contrib/karcher-rcv5/{server_v1.crt,server.key} is the source these
 // get copied from, not where they run from on the robot.
 KaercherRCV5ValetudoRobot.CERT_PATH = "/userdata/valetudo/server_v1.crt";
 KaercherRCV5ValetudoRobot.KEY_PATH = "/userdata/valetudo/server.key";
@@ -458,7 +458,7 @@ KaercherRCV5ValetudoRobot.IDENTITY_PATH = "/userdata/valetudo/device-identity.js
 // Defaults to the real on-device loopback-alias bind (see KaercherAiotDummycloud.BIND_IP's
 // own comment) — only correct once Valetudo actually runs ON the robot. Dev-Mac test
 // harnesses running Valetudo remotely need to override this to "0.0.0.0" instead, the
-// same way local/karcher-dev-certs/run_dummycloud.js already does for
+// same way contrib/karcher-rcv5/run_dummycloud.js already does for
 // KaercherAiotDummycloud directly.
 KaercherRCV5ValetudoRobot.BIND_IP = KaercherAiotDummycloud.BIND_IP;
 

@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# valetudo     Starts the Valetudo binary on boot.
+#
+# aiot_client and its existing wifi-deamon.sh supervision are untouched by this
+# script. Valetudo only sees real cloud traffic once karcher-cloud-switch.sh has
+# been run to redirect it (that redirect does not currently survive a reboot,
+# so after a fresh boot this just leaves Valetudo idle until switched).
+#
+
+VALETUDO=/userdata/valetudo/valetudo
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/oem/bin
+export VALETUDO_CONFIG_PATH=/userdata/valetudo/config.json
+export VALETUDO_LOG_PATH=/userdata/valetudo/valetudo.log
+
+[ -x "$VALETUDO" ] || exit 0
+
+case "$1" in
+  start)
+	# start-stop-daemon -S -x matches by /proc/*/exe, which should already
+	# dedupe against a running instance — but the same busybox build's -K -n
+	# was found to falsely never match a full path (see stop() below), so
+	# don't trust -S's dedupe either without an explicit guard.
+	if pidof "$(basename "$VALETUDO")" >/dev/null 2>&1; then
+		echo "already running"
+		exit 0
+	fi
+	echo "Starting Valetudo..."
+	start-stop-daemon -S -b -x "$VALETUDO"
+	echo "OK"
+	;;
+  stop)
+	echo "Stopping Valetudo..."
+	# start-stop-daemon -K -n matches against /proc/*/comm (the short process
+	# name, no path) — passing the full $VALETUDO path there never matches
+	# anything, confirmed live 2026-09-18. Plain killall by basename is what
+	# this repo's own switch script already relies on elsewhere (killall
+	# Monitor/aiot_client.bin) for exactly this reason.
+	killall "$(basename "$VALETUDO")"
+	echo "OK"
+	;;
+  restart)
+	"$0" stop
+	sleep 1 # Prevent race condition: ensure Valetudo stops before start.
+	"$0" start
+	;;
+  *)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+esac
