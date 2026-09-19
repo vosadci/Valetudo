@@ -52,24 +52,26 @@ This installs all three workspaces (`backend`, `frontend`, `docs`).
 ## Generating the dev TLS certificate
 
 Kärcher's `aiot_client` on the robot only trusts a specific, oddly-shaped
-certificate (a genuine ASN.1 v1 cert — the two-step generation below exists
-because a normal v3 cert, which is what every modern TLS library emits by
-default, gets rejected by its mbedTLS stack). Nothing here is extracted
-from the Kärcher app; it's a self-signed cert generated fresh on your
-machine, impersonating `*.3irobotix.net` purely so `aiot_client` accepts
-the handshake with your local Valetudo instance instead of the real cloud.
-
-From `contrib/karcher-rcv5/`:
+certificate (a genuine ASN.1 v1 cert — `gen_cert.py` first builds a normal
+v3 cert, since that's all `cryptography` can emit, then strips the version
+field from the DER by hand, because a v3 cert gets rejected by its mbedTLS
+stack). Nothing here is extracted from the Kärcher app; it's a self-signed
+cert generated fresh on your machine, impersonating `*.3irobotix.net`
+purely so `aiot_client` accepts the handshake with your local Valetudo
+instance instead of the real cloud.
 
 ```sh
-python3 gen_cert.py    # writes server.key, server.crt (v3)
-python3 make_v1.py     # reads those, writes server_v1.crt / server_v1.der (v1)
+python3 gen_cert.py
 ```
 
-Run both from inside this directory — they read/write bare filenames
-relative to the current directory, not `__dirname`. `install.sh` (below)
-pushes `server_v1.crt` and `server.key` to the robot; `server.crt`/
-`server_v1.der` are intermediates you can ignore afterward.
+Safe to run from anywhere (it resolves paths off its own location, not the
+current directory) and safe to re-run: it's a no-op if `server.key`,
+`server.crt`, `server_v1.crt`, and `server_v1.der` already exist, and only
+ever writes all four together (via temp files + atomic rename), so an
+interrupted run can never leave a mismatched key/cert pair behind. Pass
+`--force` to regenerate deliberately. `install.sh` (below) pushes
+`server_v1.crt` and `server.key` to the robot; `server.crt`/`server_v1.der`
+are intermediates you can ignore afterward.
 
 You do **not** need to extract anything from the Kärcher app for this step.
 The third cert the robot needs, `gdroot-g2.crt`, is *not* generated here —
