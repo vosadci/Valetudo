@@ -35,6 +35,8 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             side_brush: undefined,
             hypa: undefined,
             mop_life: undefined,
+            cleaning_time: undefined,
+            cleaning_area: undefined,
             // Needed by KaercherMapSegmentationCapability's set_preference calls
             // (doc/PROTOCOL.md §14) — the preference table is keyed per map_id.
             current_map_id: undefined
@@ -108,6 +110,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             capabilities.KaercherWaterUsageControlCapability,
             capabilities.KaercherOperationModeControlCapability,
             capabilities.KaercherConsumableMonitoringCapability,
+            capabilities.KaercherCurrentStatisticsCapability,
             capabilities.KaercherMapSegmentationCapability,
             capabilities.KaercherZoneCleaningCapability
         ];
@@ -277,7 +280,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
                 statusRelevant = true;
             }
         }
-        for (const key of ["main_brush", "side_brush", "hypa", "mop_life", "current_map_id"]) {
+        for (const key of ["main_brush", "side_brush", "hypa", "mop_life", "current_map_id", "cleaning_time", "cleaning_area"]) {
             if (data[key] !== undefined) {
                 this.ephemeralState[key] = data[key];
             }

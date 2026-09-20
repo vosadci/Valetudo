@@ -26,6 +26,7 @@ describe("KaercherRCV5ValetudoRobot", () => {
             [
                 "BasicControlCapability",
                 "ConsumableMonitoringCapability",
+                "CurrentStatisticsCapability",
                 "FanSpeedControlCapability",
                 "MapSegmentationCapability",
                 "OperationModeControlCapability",
