@@ -91,6 +91,54 @@ const CONSUMABLE_RESET_IDS = Object.freeze({
 });
 
 /**
+ * Map-overlay constants, ported from the karcher-rcv5-ha HA integration's
+ * map_parser.py/map_render.py, which already draws these correctly against a real
+ * account/device — see that repo's doc/MAP_DATA.md §6.4/§6.7 for the underlying
+ * research.
+ */
+
+// RobotMap.furniture_info type_id marking an area carpet (rug), as opposed to an
+// actual piece of furniture. APK-verified: GlobalRender.updateMatericalSpecialInfo.
+const FURNITURE_CARPET_TYPE_ID = 1550;
+
+// RobotMap.objects type_id that duplicates the area-carpet polygon above — the app
+// also reports carpets as an AI object detection, which would otherwise render as
+// a second, redundant marker on top of the polygon from furniture_info.
+const OBJECT_TYPE_CARPET = 1005;
+
+/**
+ * RobotMap.virtual_walls (DeviceAreaDataInfo.type) restriction kinds. NOT the same
+ * values the app itself sends when creating one (1=no-go, 2=line wall, 3=no-mop,
+ * per APK WallSettingActivity) — the device re-codes no-mop to 6 on the report
+ * path, confirmed against a real RCV5 capture 2026-06-19. Only virtual_walls (field
+ * 9) carries restrictions; RobotMap.areas_info (field 10) is a different concept
+ * (the currently-drawn zone-clean rectangle) and must not be treated as one — doing
+ * so once made a drawn clean area render as a phantom no-go zone in the HA
+ * integration. Unknown/unmapped type codes fall through to ZONE_TYPE_NOGO, so
+ * areas still surface even for a type this table doesn't know about yet.
+ */
+const ZONE_TYPE_NOGO = 1;
+const ZONE_TYPE_WALL = 2;
+const ZONE_TYPE_NOMOP = 6;
+
+/**
+ * RobotMap.objects (ObjectDataInfo.objectTypeId) → display label, from the app's
+ * own AI-recognition categories (mdi icon choices ported from the HA integration's
+ * Lovelace card, www/card/map-draw.js OBJECT_ICONS). OBJECT_TYPE_CARPET (1005) is
+ * deliberately absent — filtered out before reaching this lookup.
+ */
+const AI_OBJECT_TYPE_LABELS = Object.freeze({
+    1001: "Sock",
+    1002: "Shoe",
+    1003: "Wire",
+    1006: "Cat",
+    1007: "Dog",
+    1011: "Pet waste",
+    1017: "Scale",
+    1038: "Chair"
+});
+
+/**
  * doc/PROTOCOL.md §6 fault code table (APK-verified). Only the message text is used
  * here — severity/subsystem classification per-code is deliberately not attempted
  * (would be guesswork beyond what's documented); ValetudoRobotError falls back to
@@ -231,6 +279,12 @@ module.exports = {
     PRESET_TO_MODE: PRESET_TO_MODE,
     CONSUMABLE_FULL_LIFE_MINUTES: CONSUMABLE_FULL_LIFE_MINUTES,
     CONSUMABLE_RESET_IDS: CONSUMABLE_RESET_IDS,
+    FURNITURE_CARPET_TYPE_ID: FURNITURE_CARPET_TYPE_ID,
+    OBJECT_TYPE_CARPET: OBJECT_TYPE_CARPET,
+    ZONE_TYPE_NOGO: ZONE_TYPE_NOGO,
+    ZONE_TYPE_WALL: ZONE_TYPE_WALL,
+    ZONE_TYPE_NOMOP: ZONE_TYPE_NOMOP,
+    AI_OBJECT_TYPE_LABELS: AI_OBJECT_TYPE_LABELS,
     FAULT_MESSAGES: FAULT_MESSAGES,
     STATUS_ONLY_FAULT_CODES: STATUS_ONLY_FAULT_CODES,
     STATUS_MESSAGES: STATUS_MESSAGES,

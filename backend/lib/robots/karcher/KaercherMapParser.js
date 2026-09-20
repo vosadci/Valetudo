@@ -1,3 +1,4 @@
+const KaercherConst = require("./KaercherConst");
 const KaercherMapCrypto = require("./KaercherMapCrypto");
 const Logger = require("../../Logger");
 const mapEntities = require("../../entities/map");
@@ -20,6 +21,15 @@ const Protobufs = require("./generated/karcher_protobufs.js");
  * current_pose/history_pose and the newest map_upload_date; `_2` is an older,
  * pose-less snapshot with identical grid data; `_3` was empty in the one account
  * tested). `_2`/`_3` are not handled here — see KaercherAiotDummycloud's upload route.
+ *
+ * Also builds virtual walls / no-go / no-mop overlays (`virtualWalls`), area
+ * carpets (`furnitureInfo`), and AI-detected obstacle markers (`objects`) — ported
+ * from the karcher-rcv5-ha HA integration's map_parser.py/map_render.py, which
+ * already renders these correctly against a real account/device (that repo's
+ * doc/MAP_DATA.md §6.4/§6.7). `areasInfo` (field 10) is deliberately never read:
+ * it's the currently-drawn zone-clean rectangle, not a restriction, and the HA
+ * integration found the hard way that treating it as one renders a phantom no-go
+ * zone.
  */
 class KaercherMapParser {
     /**
@@ -181,6 +191,91 @@ class KaercherMapParser {
                 type: mapEntities.PathMapEntity.TYPE.PATH
             }));
         }
+
+        (robotMap.virtualWalls ?? []).forEach((zone) => {
+            const points = (zone.points ?? []).map(p => toValetudo(p.x, p.y));
+
+            if (zone.type === KaercherConst.ZONE_TYPE_WALL) {
+                // Device-confirmed 2026-09-20 (real RCV5 capture): the robot sends a
+                // wall's points as duplicated pairs, e.g. [A, A, B, B], not the plain
+                // [A, B] the APK-derived doc implied. Valetudo's frontend draws a
+                // VIRTUAL_WALL LineMapEntity from only its first two points, so an
+                // un-deduped [A, A, ...] renders a zero-length (invisible) line.
+                // Collapse consecutive duplicates first, then emit one LineMapEntity
+                // per remaining segment, in case a wall ever has more than 2 distinct
+                // points (the frontend only draws 2 points per entity, so an N-point
+                // polyline needs N-1 separate entities to render as connected segments).
+                const distinctPoints = points.filter((p, i) => {
+                    return i === 0 || p.x !== points[i - 1].x || p.y !== points[i - 1].y;
+                });
+                for (let i = 0; i < distinctPoints.length - 1; i++) {
+                    entities.push(new mapEntities.LineMapEntity({
+                        points: [distinctPoints[i].x, distinctPoints[i].y, distinctPoints[i + 1].x, distinctPoints[i + 1].y],
+                        type: mapEntities.LineMapEntity.TYPE.VIRTUAL_WALL
+                    }));
+                }
+                return;
+            }
+
+            // A 2-point area is two diagonal rectangle corners, not a degenerate
+            // polygon — same convention the app itself draws it with.
+            let corners = points;
+            if (points.length === 2) {
+                const [p0, p1] = points;
+                corners = [p0, {x: p1.x, y: p0.y}, p1, {x: p0.x, y: p1.y}];
+            }
+            if (corners.length < 3) {
+                return;
+            }
+
+            entities.push(new mapEntities.PolygonMapEntity({
+                points: corners.flatMap(p => [p.x, p.y]),
+                // Unknown/unmapped type codes intentionally fall through to
+                // NO_GO_AREA here too, so an area still surfaces even for a type
+                // this robot hasn't been seen sending yet.
+                type: zone.type === KaercherConst.ZONE_TYPE_NOMOP ?
+                    mapEntities.PolygonMapEntity.TYPE.NO_MOP_AREA :
+                    mapEntities.PolygonMapEntity.TYPE.NO_GO_AREA,
+                metaData: {id: String(zone.areaIndex)}
+            }));
+        });
+
+        (robotMap.furnitureInfo ?? []).forEach((item) => {
+            if (item.typeId !== KaercherConst.FURNITURE_CARPET_TYPE_ID) {
+                return;
+            }
+
+            // The app itself only ever consumes the first four points of an entry
+            // as a quad; further points are ignored, so we must do the same.
+            const points = (item.points ?? []).slice(0, 4).map(p => toValetudo(p.x, p.y));
+            if (points.length < 3) {
+                return;
+            }
+
+            entities.push(new mapEntities.PolygonMapEntity({
+                points: points.flatMap(p => [p.x, p.y]),
+                type: mapEntities.PolygonMapEntity.TYPE.CARPET,
+                metaData: {id: String(item.id)}
+            }));
+        });
+
+        (robotMap.objects ?? []).forEach((object) => {
+            if (object.objectTypeId === KaercherConst.OBJECT_TYPE_CARPET) {
+                // Duplicates the area-carpet polygon from furniture_info above.
+                return;
+            }
+
+            const {x, y} = toValetudo(object.x, object.y);
+            entities.push(new mapEntities.PointMapEntity({
+                points: [x, y],
+                type: mapEntities.PointMapEntity.TYPE.OBSTACLE,
+                metaData: {
+                    id: String(object.objectId),
+                    label: KaercherConst.AI_OBJECT_TYPE_LABELS[object.objectTypeId] ??
+                        `Object type ${object.objectTypeId}`
+                }
+            }));
+        });
 
         return new mapEntities.ValetudoMap({
             metaData: {

@@ -46,6 +46,30 @@ function buildRobotMap() {
             {roomId: 10, roomName: "Room A"},
             {roomId: 14, roomName: "Room B"}
             // roomId 15 intentionally absent, to cover the "no matching room" path
+        ],
+        virtualWalls: [
+            // Real RCV5 capture, 2026-09-20: the device sends a wall's points as
+            // duplicated pairs, not the plain [A, B] the APK-derived doc implied.
+            {type: 2, areaIndex: 1, points: [{x: 0, y: 0}, {x: 0, y: 0}, {x: 0.1, y: 0.1}, {x: 0.1, y: 0.1}]}, // line wall
+            {type: 1, areaIndex: 2, points: [{x: 0, y: 0}, {x: 0.1, y: 0.05}]}, // no-go, 2-point diagonal
+            {type: 6, areaIndex: 3, points: [{x: 0, y: 0}, {x: 0.05, y: 0}, {x: 0.05, y: 0.05}]}, // no-mop
+            {type: 99, areaIndex: 4, points: [{x: 0, y: 0}, {x: 0.05, y: 0}, {x: 0.05, y: 0.05}]} // unknown -> no-go fallback
+        ],
+        furnitureInfo: [
+            {
+                id: 7,
+                typeId: 1550, // area carpet
+                points: [
+                    {x: 0.05, y: 0}, {x: 0.1, y: 0}, {x: 0.1, y: 0.05}, {x: 0.05, y: 0.05},
+                    {x: 999, y: 999} // 5th point must be ignored, matching the app's own quad-only behaviour
+                ]
+            },
+            {id: 8, typeId: 999, points: [{x: 0, y: 0}, {x: 0.05, y: 0}, {x: 0.05, y: 0.05}]} // real furniture, not a carpet
+        ],
+        objects: [
+            {objectId: 5, objectTypeId: 1002, x: 0.1, y: 0.1}, // shoe
+            {objectId: 6, objectTypeId: 9999, x: 0, y: 0}, // unknown type -> generic label
+            {objectId: 7, objectTypeId: 1005, x: 0, y: 0} // carpet AI-detection, must be filtered
         ]
     };
 }
@@ -168,6 +192,68 @@ describe("KaercherMapParser", () => {
             const map = KaercherMapParser.BUILD_VALETUDO_MAP(robotMap);
 
             assert.strictEqual(map.entities.find(e => e.type === "charger_location"), undefined);
+        });
+
+        it("dedupes a wall's duplicated point pairs into a single 2-point line entity", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            const walls = map.entities.filter(e => e.type === "virtual_wall");
+            // Without deduping, points[0..3] (the frontend's only read range for a
+            // wall) would be the duplicated first point twice -> an invisible
+            // zero-length line. This is the regression this fix guards against.
+            assert.strictEqual(walls.length, 1);
+            assert.deepStrictEqual(walls[0].points, [0, 15, 10, 5]);
+        });
+
+        it("splits a wall with more than 2 distinct points into one line entity per segment", () => {
+            const robotMap = buildRobotMap();
+            robotMap.virtualWalls = [
+                {type: 2, areaIndex: 1, points: [{x: 0, y: 0}, {x: 0.05, y: 0}, {x: 0.05, y: 0.05}]}
+            ];
+
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(robotMap);
+
+            const walls = map.entities.filter(e => e.type === "virtual_wall");
+            assert.strictEqual(walls.length, 2, "3 distinct points -> 2 connected segments");
+            assert.deepStrictEqual(walls[0].points, [0, 15, 5, 15]);
+            assert.deepStrictEqual(walls[1].points, [5, 15, 5, 10]);
+        });
+
+        it("expands a 2-point no-go zone into a diagonal rectangle, and keeps a 3+ point no-mop zone as-is", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            const noGoAreas = map.entities.filter(e => e.type === "no_go_area");
+            assert.strictEqual(noGoAreas.length, 2, "the 2-point no-go entry, plus the unknown-type fallback");
+            assert.deepStrictEqual(noGoAreas[0].points, [0, 15, 10, 15, 10, 10, 0, 10]);
+            assert.deepStrictEqual(noGoAreas[0].metaData, {id: "2"});
+            assert.deepStrictEqual(noGoAreas[1].metaData, {id: "4"}, "type 99 is unmapped and must fall back to no-go, not be dropped");
+
+            const noMopAreas = map.entities.filter(e => e.type === "no_mop_area");
+            assert.strictEqual(noMopAreas.length, 1);
+            assert.deepStrictEqual(noMopAreas[0].points, [0, 15, 5, 15, 5, 10]);
+        });
+
+        it("builds a carpet polygon from furniture_info, using only the first 4 points and ignoring non-carpet furniture", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            const carpets = map.entities.filter(e => e.type === "carpet");
+            assert.strictEqual(carpets.length, 1, "typeId 999 is furniture, not a carpet, and must be excluded");
+            assert.deepStrictEqual(carpets[0].points, [5, 15, 10, 15, 10, 10, 5, 10]);
+            assert.deepStrictEqual(carpets[0].metaData, {id: "7"});
+        });
+
+        it("builds obstacle markers from AI-detected objects, filtering out the carpet-duplicate type", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            const obstacles = map.entities.filter(e => e.type === "obstacle");
+            assert.strictEqual(obstacles.length, 2, "objectTypeId 1005 duplicates the furniture_info carpet and must be excluded");
+
+            const shoe = obstacles.find(o => o.metaData.id === "5");
+            assert.deepStrictEqual(shoe.points, [10, 5]);
+            assert.strictEqual(shoe.metaData.label, "Shoe");
+
+            const unknown = obstacles.find(o => o.metaData.id === "6");
+            assert.strictEqual(unknown.metaData.label, "Object type 9999");
         });
 
         it("returns null when the grid payload length doesn't match sizeX*sizeY", () => {
