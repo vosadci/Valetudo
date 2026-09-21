@@ -60,6 +60,17 @@ class KaercherMqtt5Server {
     _handlePacket(socket, packet) {
         switch (packet.cmd) {
             case "connect":
+                // This is a genuinely single-client server (see class doc) — a second
+                // connect while one client is already active must not silently steal
+                // `this.socket` out from under it (live-confirmed this session: an
+                // unrelated debug connection did exactly that, and every publish() call
+                // afterwards silently wrote to the now-dead second socket instead of the
+                // real device until the process was restarted).
+                if (this.socket && this.socket !== socket && !this.socket.destroyed) {
+                    Logger.warn("KaercherMqtt5Server: rejecting connect, a client is already active");
+                    socket.destroy();
+                    return;
+                }
                 this.socket = socket;
                 this._write(socket, {cmd: "connack", reasonCode: 0, sessionPresent: false, properties: {}});
                 Logger.info(`KaercherMqtt5Server client connected: ${packet.clientId}`);

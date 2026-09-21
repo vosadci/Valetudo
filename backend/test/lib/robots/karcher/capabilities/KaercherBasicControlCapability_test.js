@@ -35,6 +35,16 @@ describe("KaercherBasicControlCapability", () => {
             assert.deepStrictEqual(sent[0].params, {room_ids: [1, 2], ctrl_value: 1, clean_type: 0});
         });
 
+        it("start() sends build_map instead when no rooms are known yet", async () => {
+            const {robot, sent} = buildRobot(undefined);
+            robot.state.map = {getSegments: () => []};
+
+            await new KaercherBasicControlCapability({robot: robot}).start();
+
+            assert.strictEqual(sent[0].name, "build_map");
+            assert.deepStrictEqual(sent[0].params, {ctrl_value: 1});
+        });
+
         it("stop()/pause() send set_room_clean", async () => {
             const {robot, sent} = buildRobot(undefined);
             await new KaercherBasicControlCapability({robot: robot}).stop();

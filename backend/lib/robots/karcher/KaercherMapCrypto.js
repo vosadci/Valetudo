@@ -35,7 +35,9 @@ class KaercherMapCrypto {
         const key = KaercherMapCrypto.GET_MAP_ENC_KEY(sn, mac, productId);
         const decipher = crypto.createDecipheriv("aes-128-ecb", key, null);
         decipher.setAutoPadding(false);
-        const raw = Buffer.concat([decipher.update(Buffer.from(data, "base64")), decipher.final()]);
+
+        const ciphertext = Buffer.from(data, "base64");
+        const raw = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 
         const padLen = raw[raw.length - 1];
         const hex = raw.subarray(0, raw.length - padLen).toString("utf-8");

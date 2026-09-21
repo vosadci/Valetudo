@@ -60,8 +60,9 @@ class KaercherMapParser {
             // from the live cloud account, producing sensible content matching
             // doc/MAP_DATA.md §4.2's byte table exactly. Not yet confirmed byte-for-byte
             // on an actual PUT body from the robot itself.
+            const bodyText = rawUploadBody.toString("utf-8");
             const decrypted = KaercherMapCrypto.DECRYPT_MAP(
-                this.sn, this.mac, this.productId, rawUploadBody.toString("utf-8")
+                this.sn, this.mac, this.productId, bodyText
             );
 
             robotMap = Protobufs.decodeRobotMap(decrypted);
