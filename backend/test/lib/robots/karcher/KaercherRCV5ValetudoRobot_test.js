@@ -100,6 +100,62 @@ describe("KaercherRCV5ValetudoRobot", () => {
         assert.strictEqual(robot.ephemeralState.current_map_id, 7);
     });
 
+    it("restores map/record upload defaults to 0 if a push shows either at 1, preserving every other privacy field", () => {
+        // Regression test for a bug in an earlier revision: this code used to force
+        // map_uploads/record_uploads to 1 on the mistaken theory that 1 meant
+        // "upload consent granted" and that this gated carpet/AI-object map data.
+        // The app's own UI (PrivacySecurityActivity.java) shows these toggles as ON
+        // when the value is 0, so 0/0 was already the enabled default and the old
+        // fix actually disabled uploads. This restores 0/0 if it's ever seen
+        // flipped away from that.
+        const robot = buildRobot();
+        const sent = [];
+        robot.sendPropertySet = async (params) => {
+            sent.push(params);
+        };
+
+        robot.parseAndUpdateState({
+            privacy: {
+                ai_recognize: 1,
+                dirt_recognize: 0,
+                pet_recognize: 0,
+                carpet_turbo: 1,
+                carpet_avoid: 1,
+                carpet_show: 1,
+                map_uploads: 1,
+                record_uploads: 1,
+                auto_upgrade: 0
+            }
+        });
+
+        assert.strictEqual(sent.length, 1);
+        assert.deepStrictEqual(sent[0], {
+            privacy: {
+                ai_recognize: 1,
+                dirt_recognize: 0,
+                pet_recognize: 0,
+                carpet_turbo: 1,
+                carpet_avoid: 1,
+                carpet_show: 1,
+                map_uploads: 0,
+                record_uploads: 0,
+                auto_upgrade: 0
+            }
+        });
+    });
+
+    it("does not re-send once both upload flags already read the 0 default", () => {
+        const robot = buildRobot();
+        const sent = [];
+        robot.sendPropertySet = async (params) => {
+            sent.push(params);
+        };
+
+        robot.parseAndUpdateState({privacy: {map_uploads: 0, record_uploads: 0, carpet_show: 1}});
+
+        assert.strictEqual(sent.length, 0);
+    });
+
     describe("isZoneCleanActive", () => {
         it("is true only for the zone-clean work_mode family (30/31/32)", () => {
             const robot = buildRobot();

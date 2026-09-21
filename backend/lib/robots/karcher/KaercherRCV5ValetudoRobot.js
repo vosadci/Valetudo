@@ -286,6 +286,27 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             }
         }
 
+        // A previous revision of this code force-set map_uploads/record_uploads to
+        // 1, on the mistaken assumption that 1 meant "consent granted" and that
+        // this consent gated the carpet/AI-object data missing from map uploads.
+        // Both were wrong: the app's own UI (PrivacySecurityActivity.java) shows
+        // these toggles as ON when the value is 0 — so the observed 0/0 was
+        // already the enabled default, and forcing 1/1 actually disabled uploads.
+        // (The real carpet gap was unrelated: the RCV5 encodes carpet as grid
+        // bytes in mapData, not via furniture_info — see KaercherMapParser.
+        // DECODE_CELL.) This restores the 0/0 default if the earlier bug flipped
+        // it; harmless no-op once it has.
+        if (
+            data.privacy !== undefined &&
+            (data.privacy.map_uploads !== 0 || data.privacy.record_uploads !== 0)
+        ) {
+            this.sendPropertySet({
+                privacy: {...data.privacy, map_uploads: 0, record_uploads: 0}
+            }).catch(e => {
+                Logger.warn("KaercherRCV5ValetudoRobot: failed to restore map/record upload defaults", e);
+            });
+        }
+
         if (data.quantity !== undefined) {
             this.ephemeralState.quantity = data.quantity;
         }

@@ -14,7 +14,7 @@ const KaercherMapParser = require("../../../../lib/robots/karcher/KaercherMapPar
  *
  * Grid (row-major, row 0 = world minY = image bottom per doc/MAP_DATA.md §5):
  *   row 0: 0(skip)        1(floor)         255(wall)        10(segment 10, unvisited)
- *   row 1: 65(segment 15, cleaned: 65-50)  192(segment 14, carpet: 206-192)  253(floor, carpet outside room)  3(wall, 3&3==3)
+ *   row 1: 65(segment 15, cleaned: 65-50)  192(segment 14 carpet: 206-192)  253(floor carpet, outside room)  3(wall, 3&3==3)
  *   row 2: 130(skip, 128-146)  200(skip, 197-252)  254(skip)  2(floor, deep-cleaned: 2&3==2)
  */
 function buildRobotMap() {
@@ -88,15 +88,15 @@ describe("KaercherMapParser", () => {
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(2), {kind: "floor"});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(3), {kind: "wall"});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(255), {kind: "wall"});
-            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(253), {kind: "floor"});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(253), {kind: "floor", carpet: true});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(10), {kind: "segment", segmentId: 10});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(59), {kind: "segment", segmentId: 59});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(60), {kind: "segment", segmentId: 10});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(65), {kind: "segment", segmentId: 15});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(127), {kind: "segment", segmentId: 77});
-            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(147), {kind: "segment", segmentId: 59});
-            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(192), {kind: "segment", segmentId: 14});
-            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(196), {kind: "segment", segmentId: 10});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(147), {kind: "segment", segmentId: 59, carpet: true});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(192), {kind: "segment", segmentId: 14, carpet: true});
+            assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(196), {kind: "segment", segmentId: 10, carpet: true});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(128), {kind: "skip"});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(146), {kind: "skip"});
             assert.deepStrictEqual(KaercherMapParser.DECODE_CELL(197), {kind: "skip"});
@@ -149,22 +149,55 @@ describe("KaercherMapParser", () => {
             assert.strictEqual(map.metaData.vendorMapId, 42);
             assert.deepStrictEqual(map.metaData.worldOrigin, {minX: 0, minY: 0, sizeY: 3, resolution: 0.05});
 
-            assert.strictEqual(findLayer(map, "floor").dimensions.pixelCount, 3);
+            // Byte 253 (row 1, col 2) is a carpet cell, split into its own floor
+            // layer rather than counted as plain floor (see the carpet test below).
+            assert.strictEqual(findLayer(map, "floor").dimensions.pixelCount, 2);
             assert.strictEqual(findLayer(map, "wall").dimensions.pixelCount, 2);
 
             const seg10 = findLayer(map, "segment", 10);
             assert.strictEqual(seg10.dimensions.pixelCount, 1);
             assert.strictEqual(seg10.metaData.name, "Room A");
+            assert.strictEqual(seg10.metaData.material, undefined);
 
+            // Room 14's only cell (byte 192) is a carpet cell, but it must stay in
+            // this one plain segment layer — a second, carpet-tagged segment layer
+            // sharing the same ID produced a second, wrong-area room label
+            // (StructureManager.ts emits one label per segment-type layer, not one
+            // per unique segment ID). The carpet is instead an entity, see below.
             const seg14 = findLayer(map, "segment", 14);
             assert.strictEqual(seg14.dimensions.pixelCount, 1);
             assert.strictEqual(seg14.metaData.name, "Room B");
+            assert.strictEqual(seg14.metaData.material, undefined);
 
             const seg15 = findLayer(map, "segment", 15);
             assert.strictEqual(seg15.dimensions.pixelCount, 1);
             assert.strictEqual(seg15.metaData.name, undefined, "segment 15 has no room_data_info entry");
 
-            assert.strictEqual(map.layers.length, 5); // floor, wall, 3 segments
+            assert.strictEqual(map.layers.length, 6); // floor, floor-carpet, wall, segment 10, segment 14, segment 15
+        });
+
+        it("gives out-of-room carpet cells their own carpet-textured floor layer", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            const floorCarpet = map.layers.find(l => l.type === "floor" && l.metaData.material === "carpet");
+            assert.ok(floorCarpet, "byte 253 (out-of-room carpet) should produce a carpet floor layer");
+            assert.strictEqual(floorCarpet.dimensions.pixelCount, 1);
+
+            assert.strictEqual(
+                map.layers.find(l => l.type === "segment" && l.metaData.material === "carpet"),
+                undefined,
+                "in-room carpet must never produce a second segment layer (see the room-labels test above)"
+            );
+        });
+
+        it("builds a CARPET polygon entity from a room's carpet-cell bounding box", () => {
+            const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
+
+            // Room 14's only cell is byte 192 at grid (col 1, row 1) -> image coords
+            // (1, height-1-1) = (1, 1) -> cm (5, 5) to (10, 10) for a single cell.
+            const carpet = map.entities.find(e => e.type === "carpet" && e.metaData.id === "room-14-carpet");
+            assert.ok(carpet);
+            assert.deepStrictEqual(carpet.points, [5, 5, 10, 5, 10, 10, 5, 10]);
         });
 
         it("places robot/charger entities and the history path using world->pixel conversion", () => {
@@ -236,10 +269,15 @@ describe("KaercherMapParser", () => {
         it("builds a carpet polygon from furniture_info, using only the first 4 points and ignoring non-carpet furniture", () => {
             const map = KaercherMapParser.BUILD_VALETUDO_MAP(buildRobotMap());
 
+            // 2 total: 1 from furniture_info (below) + 1 from room 14's grid-byte
+            // carpet cell (its own test above) — typeId 999 is furniture, not a
+            // carpet, and must be excluded from both sources.
             const carpets = map.entities.filter(e => e.type === "carpet");
-            assert.strictEqual(carpets.length, 1, "typeId 999 is furniture, not a carpet, and must be excluded");
-            assert.deepStrictEqual(carpets[0].points, [5, 15, 10, 15, 10, 10, 5, 10]);
-            assert.deepStrictEqual(carpets[0].metaData, {id: "7"});
+            assert.strictEqual(carpets.length, 2);
+
+            const furnitureCarpet = carpets.find(c => c.metaData.id === "7");
+            assert.ok(furnitureCarpet);
+            assert.deepStrictEqual(furnitureCarpet.points, [5, 15, 10, 15, 10, 10, 5, 10]);
         });
 
         it("builds obstacle markers from AI-detected objects, filtering out the carpet-duplicate type", () => {

@@ -11,7 +11,7 @@ Protocol facts are sourced from the `karcher-rcv5-ha` repo's
 device). Citations below are file + section, not line numbers, since that
 repo evolves independently of this one.
 
-**Last updated:** 2026-09-20 (`CurrentStatisticsCapability` implemented; map now renders virtual walls, no-go/no-mop zones, AI-object markers — all live-confirmed on-device. Area carpets still don't render; root cause found, fix not started, see below)
+**Last updated:** 2026-09-21 (`CurrentStatisticsCapability` implemented; map now renders virtual walls, no-go/no-mop zones, carpet, and AI-object markers — all live-confirmed on-device. Carpet: the privacy-consent theory was wrong and has been reverted — root cause is that the RCV5 encodes carpet as grid bytes, not `furniture_info`; parser now splits those bytes into their own carpet-textured map layers)
 
 ## Legend
 
@@ -151,7 +151,7 @@ real account/device):
 | `virtualWalls` (field 9), `type === 2` | `LineMapEntity.TYPE.VIRTUAL_WALL` | one or more line segments — see the dedup note below. **Live-confirmed 2026-09-20**: no-go, no-mop, and wall all now visible on-device |
 | `virtualWalls`, `type === 1` (no-go) or unmapped | `PolygonMapEntity.TYPE.NO_GO_AREA` | 2-point entries are diagonal rectangle corners, expanded to a box — same convention the app itself uses. Unknown type codes fall through to no-go rather than being dropped |
 | `virtualWalls`, `type === 6` (no-mop) | `PolygonMapEntity.TYPE.NO_MOP_AREA` | device re-codes no-mop to `6` on the report path, not the app's send-path `3` — device-confirmed by the HA integration against a real RCV5 capture, 2026-06-19 |
-| `furnitureInfo`, `typeId === 1550` | `PolygonMapEntity.TYPE.CARPET` | only the first 4 points of an entry are used, matching the app's own quad-only behaviour; other `typeId`s are real furniture and excluded. **Not yet visible on-device** — see the known gap below |
+| `furnitureInfo`, `typeId === 1550` | `PolygonMapEntity.TYPE.CARPET` | only the first 4 points of an entry are used, matching the app's own quad-only behaviour; other `typeId`s are real furniture and excluded. **Empty on every RCV5 capture taken so far — this device encodes carpet as grid bytes instead, see below** |
 | `objects`, excluding `objectTypeId === 1005` | `PointMapEntity.TYPE.OBSTACLE` | 1005 is the AI-recognition system's own "carpet" detection, which would otherwise duplicate the `furnitureInfo` polygon. Labelled via `KaercherConst.AI_OBJECT_TYPE_LABELS` (sock/shoe/wire/cat/dog/pet waste/scale/chair), falling back to `Object type N` for anything unmapped |
 
 `areasInfo` (field 10) is deliberately never read — it's the currently-drawn
@@ -166,17 +166,67 @@ zero-length, invisible line. `KaercherMapParser` now collapses consecutive
 duplicate points before building the entity, splitting into one `LineMapEntity`
 per segment if a wall ever has more than 2 distinct points.
 
-**Known gap, confirmed 2026-09-20: carpets don't render on-device yet, and it's
-not a parser bug.** A live capture showed `furnitureInfo: []` — genuinely empty,
-straight from the decoded protobuf — even though the carpet is visible in both
-the Kärcher app and the HA integration. Root cause: the HA integration fetches
-the map via a CDN *download* (`get_map_data()`), while Valetudo only intercepts
-the robot's live `map/temp/_1` *push* (`KaercherAiotDummycloud`). That live-push
-variant doesn't carry `furniture_info` at all. Fixing this needs fetching the
-map through the other channel — `service.upload_by_mapid`, a QuickLZ-compressed
-protobuf delivered as a direct MQTT reply (doc/PROTOCOL.md §13.2) — instead of
-or alongside the current intercept. That's a real feature addition (new
-decompression codec, new fetch path), not a parser fix; not started.
+**Carpet gap: SOLVED 2026-09-21 — the RCV5 encodes carpet as grid bytes, not
+`furniture_info`.** Several theories were tried and rejected before landing on
+this; recorded because each rejection is informative on its own:
+
+1. First theory: the HA integration must be using a different map object. Wrong
+   — `karcher-home`'s `get_map_data()` requests the exact same `map/temp/_N`
+   object Valetudo already intercepts, decrypted with the same scheme.
+2. Second theory: `furniture_info`/`objects` are only populated live, while the
+   robot is actively over the carpet. Wrong — a capture taken while the robot
+   was actively cleaning over a real carpet still came back empty.
+3. Third theory (implemented, then reverted — see below): `privacy.map_uploads`/
+   `record_uploads` gate whether the firmware computes AI-detected content at
+   all, and forcing both to `1` would unlock it. **Wrong on two counts.** The
+   app's own `PrivacySecurityActivity.java` shows these toggles as ON when the
+   value is **`0`** (`setChecked(getMap_uploads() == 0)`), so the observed
+   `0`/`0` was already the enabled default — there was nothing to grant, and
+   forcing `1`/`1` actually flipped both to *disabled*. Separately, these
+   fields have nothing to do with carpet rendering in the first place (see
+   next point). The fix that had forced `1`/`1` has been reverted; a corrective
+   restores `0`/`0` if it's ever seen flipped away from that (see
+   `KaercherRCV5ValetudoRobot.parseAndUpdateState()`).
+4. Real cause, confirmed against `karcher-rcv5-ha`'s `doc/MAP_DATA.md` §6.4:
+   **the RCV5 doesn't use `furniture_info` for carpets at all** — that field
+   was empty in every real RCV5 capture taken so far, including one where the
+   app was actively showing a carpet on screen. Instead, carpet is encoded
+   directly in the map grid bytes Valetudo already receives and was already
+   parsing for floor/wall/segment: bytes 147-196 mark a carpet cell inside a
+   room (`room_id = 206 - byte`), byte 253 marks one outside any room. `doc/
+   MAP_DATA.md` flags the semantics as formally unresolved (the APK's own
+   symbol names say `CleanedDouble`/`COLOR_COVER_TWICE`, not "carpet"), but the
+   observed region matches the physical rug on a live RCV5, and the HA
+   integration's renderer (`map_render.py`) already treats it as carpet on
+   that basis.
+
+**Fix, take 1 (had a bug, since corrected):** `KaercherMapParser.DECODE_CELL`
+flags these byte ranges with `carpet: true`. Out-of-room cells (byte 253) get
+their own carpet-textured `FLOOR`-type `MapLayer` (`metaData.material:
+MapLayer.MATERIAL.CARPET`) — the same per-layer texture mechanism Valetudo's
+frontend (`MapLayerManagerUtils.ts`) already uses for other vendors' floor
+materials, and this part is fine since floor layers never produce a room
+label. **Live-confirmed 2026-09-21**: carpet now renders on-device, along with
+AI-object markers (e.g. wires) from `objects`.
+
+**Bug found immediately after, same day:** the first version applied the same
+per-layer-material trick to in-room carpet cells (bytes 147-196) — a second
+`SEGMENT`-type `MapLayer` sharing the room's ID, carpet-tagged. This duplicated
+every carpeted room's label: `StructureManager.ts` emits one room label per
+segment-type *layer*, not one per unique segment ID (an invariant every other
+vendor happens to satisfy simply because they only ever have one segment layer
+per room). The second, carpet-only layer produced a second label with the same
+name/ID but only the carpet cells' own tiny pixel count as its area (e.g. a
+"Bathroom, id 11" label at its correct ~2.7m², and a second "Bathroom, id 11"
+at ~0.02m² for just the rug).
+
+**Fix, corrected:** in-room carpet cells stay merged into their room's single
+segment layer (restoring one label, correct total area) and are instead
+rendered as a `PolygonMapEntity` of `TYPE.CARPET` — the same entity type
+already implemented for `furniture_info` above — using the bounding box of
+that room's carpet-flagged cells. `furniture_info` parsing is left in place
+(harmless, may be exercised by other Kärcher models), but is a no-op on every
+RCV5 capture taken so far.
 
 This covers *display* only. Editing restrictions from Valetudo's own WebUI
 (`CombinedVirtualRestrictionsCapability`'s write side) is separate, still

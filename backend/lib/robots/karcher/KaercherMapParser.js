@@ -22,14 +22,16 @@ const Protobufs = require("./generated/karcher_protobufs.js");
  * pose-less snapshot with identical grid data; `_3` was empty in the one account
  * tested). `_2`/`_3` are not handled here — see KaercherAiotDummycloud's upload route.
  *
- * Also builds virtual walls / no-go / no-mop overlays (`virtualWalls`), area
- * carpets (`furnitureInfo`), and AI-detected obstacle markers (`objects`) — ported
- * from the karcher-rcv5-ha HA integration's map_parser.py/map_render.py, which
- * already renders these correctly against a real account/device (that repo's
- * doc/MAP_DATA.md §6.4/§6.7). `areasInfo` (field 10) is deliberately never read:
- * it's the currently-drawn zone-clean rectangle, not a restriction, and the HA
- * integration found the hard way that treating it as one renders a phantom no-go
- * zone.
+ * Also builds virtual walls / no-go / no-mop overlays (`virtualWalls`), a carpet
+ * texture on affected floor/segment cells (grid bytes, see DECODE_CELL), area
+ * carpets from `furnitureInfo` (present on some other Kärcher models, empty on
+ * every RCV5 capture taken so far), and AI-detected obstacle markers (`objects`)
+ * — ported from the karcher-rcv5-ha HA integration's map_parser.py/map_render.py,
+ * which already renders these correctly against a real account/device (that
+ * repo's doc/MAP_DATA.md §6.4/§6.7). `areasInfo` (field 10) is deliberately never
+ * read: it's the currently-drawn zone-clean rectangle, not a restriction, and the
+ * HA integration found the hard way that treating it as one renders a phantom
+ * no-go zone.
  */
 class KaercherMapParser {
     /**
@@ -98,7 +100,14 @@ class KaercherMapParser {
             return null;
         }
 
-        const pixels = {floor: [], wall: [], segments: {}};
+        const pixels = {floor: [], floorCarpet: [], wall: [], segments: {}};
+        // In-room carpet cells stay in their room's single segment layer (a second,
+        // same-ID segment layer would draw a second room label with its own, much
+        // smaller area — Valetudo's frontend emits one label per segment-type layer,
+        // not one per unique segment ID, see StructureManager.ts). Instead, just the
+        // bounding box of each room's carpet cells is tracked here, and rendered
+        // below as a CARPET polygon entity overlaid on top of the room.
+        const segmentCarpetBounds = {};
 
         for (let row = 0; row < height; row++) {
             for (let col = 0; col < width; col++) {
@@ -114,9 +123,20 @@ class KaercherMapParser {
                 if (cell.kind === "wall") {
                     pixels.wall.push(coords);
                 } else if (cell.kind === "floor") {
-                    pixels.floor.push(coords);
+                    (cell.carpet ? pixels.floorCarpet : pixels.floor).push(coords);
                 } else {
                     (pixels.segments[cell.segmentId] ??= []).push(coords);
+
+                    if (cell.carpet) {
+                        segmentCarpetBounds[cell.segmentId] ??= {
+                            minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity
+                        };
+                        const bounds = segmentCarpetBounds[cell.segmentId];
+                        bounds.minX = Math.min(bounds.minX, coords[0]);
+                        bounds.maxX = Math.max(bounds.maxX, coords[0]);
+                        bounds.minY = Math.min(bounds.minY, coords[1]);
+                        bounds.maxY = Math.max(bounds.maxY, coords[1]);
+                    }
                 }
             }
         }
@@ -127,6 +147,13 @@ class KaercherMapParser {
             layers.push(new mapEntities.MapLayer({
                 pixels: pixels.floor.sort(mapEntities.MapLayer.COORDINATE_TUPLE_SORT).flat(),
                 type: mapEntities.MapLayer.TYPE.FLOOR
+            }));
+        }
+        if (pixels.floorCarpet.length > 0) {
+            layers.push(new mapEntities.MapLayer({
+                pixels: pixels.floorCarpet.sort(mapEntities.MapLayer.COORDINATE_TUPLE_SORT).flat(),
+                type: mapEntities.MapLayer.TYPE.FLOOR,
+                metaData: {material: mapEntities.MapLayer.MATERIAL.CARPET}
             }));
         }
         if (pixels.wall.length > 0) {
@@ -240,6 +267,27 @@ class KaercherMapParser {
             }));
         });
 
+        // Bounding-box CARPET overlay for each room's carpet cells (see
+        // segmentCarpetBounds above). Grid coordinates are cell indices, matching
+        // the raw units MapLayer.pixels use; entity points use cm (cell index *
+        // PIXEL_SIZE, the same scale toValetudo() applies), so that conversion has
+        // to happen here rather than reusing the raw coords collected above. +1 on
+        // the max corner includes the far edge of the last cell, not just its
+        // near corner.
+        Object.keys(segmentCarpetBounds).forEach((segmentIdStr) => {
+            const bounds = segmentCarpetBounds[segmentIdStr];
+            const x0 = bounds.minX * KaercherMapParser.PIXEL_SIZE;
+            const x1 = (bounds.maxX + 1) * KaercherMapParser.PIXEL_SIZE;
+            const y0 = bounds.minY * KaercherMapParser.PIXEL_SIZE;
+            const y1 = (bounds.maxY + 1) * KaercherMapParser.PIXEL_SIZE;
+
+            entities.push(new mapEntities.PolygonMapEntity({
+                points: [x0, y0, x1, y0, x1, y1, x0, y1],
+                type: mapEntities.PolygonMapEntity.TYPE.CARPET,
+                metaData: {id: `room-${segmentIdStr}-carpet`}
+            }));
+        });
+
         (robotMap.furnitureInfo ?? []).forEach((item) => {
             if (item.typeId !== KaercherConst.FURNITURE_CARPET_TYPE_ID) {
                 return;
@@ -297,12 +345,29 @@ class KaercherMapParser {
     }
 
     /**
-     * Decodes a single grid byte per doc/MAP_DATA.md §4.2 (APK-verified, and confirmed
-     * this session against a real fixture: byte value distribution matched exactly,
-     * including room-id values lining up 1:1 with room_data_info entries).
+     * Decodes a single grid byte per doc/MAP_DATA.md §4.2/§6.4 (APK-verified, and
+     * confirmed this session against a real fixture: byte value distribution matched
+     * exactly, including room-id values lining up 1:1 with room_data_info entries).
+     *
+     * Carpet (rugs) on the RCV5 is NOT carried by `furniture_info` (field 16) —
+     * live captures show that array empty even while the app renders a rug the
+     * user can see. It's encoded directly in these grid bytes instead: 147-196
+     * inside a room, 253 outside any room (doc/MAP_DATA.md §6.4). `furniture_info`
+     * parsing is kept below for other Kärcher models that may use it, but it's a
+     * no-op on every RCV5 capture taken so far.
+     *
+     * Out-of-room carpet cells (253) get their own FLOOR-type MapLayer with a
+     * carpet material, same as any other vendor's floor-material overlay. In-room
+     * carpet cells (147-196) do NOT get a second SEGMENT-type layer for their
+     * room — Valetudo's frontend renders one room label per segment-type layer,
+     * not one per unique segment ID, so a second layer sharing the room's ID
+     * produced a second, wrong-area label for that room (live-confirmed
+     * 2026-09-21). In-room carpet cells stay merged into their room's one
+     * segment layer and are instead rendered as a CARPET polygon entity — see
+     * `segmentCarpetBounds` in BUILD_VALETUDO_MAP.
      *
      * @param {number} byte
-     * @return {{kind: "wall"|"floor"|"segment"|"skip", segmentId?: number}}
+     * @return {{kind: "wall"|"floor"|"segment"|"skip", segmentId?: number, carpet?: boolean}}
      */
     static DECODE_CELL(byte) {
         if (byte === 255) {
@@ -310,7 +375,7 @@ class KaercherMapParser {
         }
         if (byte === 253) {
             // Carpet/second-pass cell outside any room.
-            return {kind: "floor"};
+            return {kind: "floor", carpet: true};
         }
         if (byte >= 10 && byte <= 59) {
             // Unvisited room cell.
@@ -322,7 +387,7 @@ class KaercherMapParser {
         }
         if (byte >= 147 && byte <= 196) {
             // Carpet/second-pass room cell.
-            return {kind: "segment", segmentId: 206 - byte};
+            return {kind: "segment", segmentId: 206 - byte, carpet: true};
         }
         if (byte < 10) {
             switch (byte & 0x3) {
