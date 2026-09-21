@@ -171,10 +171,17 @@ switch_hosts() {
 # /userdata/sys_debug_mode flag) would redirect /etc/hosts successfully, then
 # fail the cert cp with set -eu, leaving hosts pointed at the dummycloud with
 # stock certs still in place — neither real cloud nor working Valetudo works.
-require_oem_writable() {
+oem_writable() {
     probe="/oem/sysconf/.valetudo-rwtest.$$"
     if touch "$probe" 2>/dev/null; then
         rm -f "$probe"
+        return 0
+    fi
+    return 1
+}
+
+require_oem_writable() {
+    if oem_writable; then
         return 0
     fi
     echo "ERROR: /oem is not writable — refusing to switch (nothing has been changed)." >&2
@@ -214,17 +221,29 @@ mode_backup() {
 }
 
 mode_cloud() {
-    require_oem_writable
-
     if [ ! -f "$HOSTS_BACKUP" ] || [ ! -f "$CERT_BACKUP" ] || [ ! -f "$GDROOT_BACKUP" ]; then
         echo "no backup found under /userdata — nothing to restore, already stock?" >&2
         exit 1
     fi
 
     switch_hosts "$HOSTS_BACKUP"
-    cp "$CERT_BACKUP" "$CERT_TARGET_OEM"
+
+    if oem_writable; then
+        cp "$CERT_BACKUP" "$CERT_TARGET_OEM"
+        cp "$GDROOT_BACKUP" "$GDROOT_TARGET"
+    elif ! cmp -s "$CERT_BACKUP" "$CERT_TARGET_OEM" || ! cmp -s "$GDROOT_BACKUP" "$GDROOT_TARGET"; then
+        # /oem has no third state (see aiot-gate.sh): read-only means it's
+        # already the pristine stock partition. If it doesn't already match
+        # the backup, something is genuinely wrong and unfixable without the
+        # overlay - fail loud rather than silently leaving mismatched certs.
+        echo "ERROR: /oem is read-only and its content does not match the backup — cannot restore." >&2
+        echo "Fix with: aiot-gate.sh overlay on, then reboot, then retry this switch." >&2
+        exit 1
+    else
+        echo "/oem is already read-only and matches the backup — nothing to write there."
+    fi
+
     cp "$CERT_BACKUP" "$CERT_TARGET_USERDATA"
-    cp "$GDROOT_BACKUP" "$GDROOT_TARGET"
 
     verify_hosts "$HOSTS_BACKUP"
     verify_cert "$CERT_BACKUP"

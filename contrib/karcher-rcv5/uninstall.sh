@@ -22,8 +22,8 @@ REMOTE="root@$HOST"
 
 echo "== Switching back to stock cloud mode =="
 if ! ssh "${SSH_OPTS[@]}" "$REMOTE" '/userdata/valetudo/karcher-cloud-switch.sh cloud'; then
-    echo "FAILED to restore stock cloud config — on-device backups are likely missing or corrupt." >&2
-    echo "If you have Mac-side backups, run: ./restore-originals.sh $HOST" >&2
+    err "FAILED to restore stock cloud config — on-device backups are likely missing or corrupt."
+    err "If you have Mac-side backups, run: ./restore-originals.sh $HOST"
     exit 1
 fi
 
@@ -31,7 +31,7 @@ echo "== Reverting the wifi-deamon.sh aiot_client gate (if patched) =="
 ssh "${SSH_OPTS[@]}" "$REMOTE" '[ -x /userdata/valetudo/aiot-gate.sh ] || exit 0
     grep -q "valetudo-gate BEGIN" /oem/bin/wifi-deamon.sh 2>/dev/null || exit 0
     /userdata/valetudo/aiot-gate.sh unpatch' \
-    || echo "WARNING: could not revert the gate — check '/userdata/valetudo/aiot-gate.sh status' by hand" >&2
+    || warn "WARNING: could not revert the gate — check '/userdata/valetudo/aiot-gate.sh status' by hand"
 
 echo "== Stopping Valetudo =="
 ssh "${SSH_OPTS[@]}" "$REMOTE" '/userdata/valetudo/S96valetudo stop' || true
@@ -56,4 +56,4 @@ ssh "${SSH_OPTS[@]}" "$REMOTE" '
     echo "  .orig backups present: $([ -f /userdata/etc-hosts.orig ] && [ -f /userdata/server.crt.orig ] && [ -f /userdata/gdroot-g2.crt.orig ] && echo yes || echo no)"
 '
 
-echo "uninstall.sh complete."
+ok "uninstall.sh complete."

@@ -19,13 +19,13 @@ HOST="${1:?usage: restore-originals.sh <robot-ip-or-host>}"
 REMOTE="root@$HOST"
 
 for name in etc-hosts.orig server.crt.orig gdroot-g2.crt.orig; do
-    [ -f "$BACKUP_DIR/$name" ] || { echo "ERROR: $BACKUP_DIR/$name not found — nothing to restore" >&2; exit 1; }
+    [ -f "$BACKUP_DIR/$name" ] || { err "ERROR: $BACKUP_DIR/$name not found — nothing to restore"; exit 1; }
 done
 
 for name in etc-hosts.orig server.crt.orig gdroot-g2.crt.orig; do
     scp "${SSH_OPTS[@]}" "$BACKUP_DIR/$name" "$REMOTE:/userdata/$name"
 done
 
-echo "originals restored to /userdata on $HOST"
-echo "next: ssh $REMOTE /userdata/valetudo/karcher-cloud-switch.sh cloud (should be a no-op if already stock)"
-echo "      or ./install.sh $HOST to re-provision Valetudo from scratch"
+ok "originals restored to /userdata on $HOST"
+ok "next: ssh $REMOTE /userdata/valetudo/karcher-cloud-switch.sh cloud (should be a no-op if already stock)"
+ok "      or ./install.sh $HOST to re-provision Valetudo from scratch"

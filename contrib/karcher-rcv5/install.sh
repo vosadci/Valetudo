@@ -21,7 +21,7 @@ REMOTE="root@$HOST"
 REMOTE_DIR=/userdata/valetudo
 BINARY="$REPO_ROOT/build/armv7/valetudo"
 
-[ -f "$BINARY" ] || { echo "ERROR: $BINARY not found — build it first" >&2; exit 1; }
+[ -f "$BINARY" ] || { err "ERROR: $BINARY not found — build it first"; exit 1; }
 
 report_runtime_state() {
     ssh "${SSH_OPTS[@]}" "$REMOTE" "for f in config.json device-identity.json mode; do
@@ -31,11 +31,11 @@ report_runtime_state() {
 
 echo "== Pre-flight =="
 ssh "${SSH_OPTS[@]}" "$REMOTE" "command -v mkdir mv cmp cat >/dev/null" \
-    || { echo "ERROR: robot is missing an expected coreutils/busybox applet" >&2; exit 1; }
+    || { err "ERROR: robot is missing an expected coreutils/busybox applet"; exit 1; }
 
 AVAIL_KB=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "df /userdata | tail -1 | awk '{print \$4}'")
 if [ "$AVAIL_KB" -lt 51200 ]; then
-    echo "ERROR: only ${AVAIL_KB}KB free on /userdata, need at least 50MB" >&2
+    err "ERROR: only ${AVAIL_KB}KB free on /userdata, need at least 50MB"
     exit 1
 fi
 echo "OK: ${AVAIL_KB}KB free on /userdata"
@@ -74,7 +74,7 @@ scp "${SSH_OPTS[@]}" "$REMOTE:$REMOTE_DIR/valetudo" "$TMP_VERIFY"
 if cmp -s "$BINARY" "$TMP_VERIFY"; then
     echo "OK: on-device binary matches $BINARY exactly"
 else
-    echo "ERROR: on-device binary does NOT match local build — transfer likely corrupted, re-run install.sh" >&2
+    err "ERROR: on-device binary does NOT match local build — transfer likely corrupted, re-run install.sh"
     exit 1
 fi
 
@@ -90,8 +90,8 @@ for name in etc-hosts.orig server.crt.orig gdroot-g2.crt.orig; do
         if cmp -s "$BACKUP_DIR/$name" "$TMP_FETCH"; then
             echo "OK: $name matches existing local backup"
         else
-            echo "ERROR: $name from $HOST differs from the existing local backup at $BACKUP_DIR/$name — NOT overwriting." >&2
-            echo "This usually means you're pointing at a different physical unit than the one that backup came from. Review both by hand." >&2
+            err "ERROR: $name from $HOST differs from the existing local backup at $BACKUP_DIR/$name — NOT overwriting."
+            err "This usually means you're pointing at a different physical unit than the one that backup came from. Review both by hand."
             rm -f "$TMP_FETCH"
             exit 1
         fi
@@ -110,8 +110,8 @@ if ssh "${SSH_OPTS[@]}" "$REMOTE" "[ -f /userdata/wifi-deamon.sh.orig ]"; then
         if cmp -s "$BACKUP_DIR/wifi-deamon.sh.orig" "$TMP_FETCH"; then
             echo "OK: wifi-deamon.sh.orig matches existing local backup"
         else
-            echo "ERROR: wifi-deamon.sh.orig from $HOST differs from the existing local backup at $BACKUP_DIR/wifi-deamon.sh.orig — NOT overwriting." >&2
-            echo "This usually means you're pointing at a different physical unit than the one that backup came from. Review both by hand." >&2
+            err "ERROR: wifi-deamon.sh.orig from $HOST differs from the existing local backup at $BACKUP_DIR/wifi-deamon.sh.orig — NOT overwriting."
+            err "This usually means you're pointing at a different physical unit than the one that backup came from. Review both by hand."
             rm -f "$TMP_FETCH"
             exit 1
         fi
@@ -128,5 +128,5 @@ echo "== Post-install runtime state (should be unchanged from pre-existing) =="
 report_runtime_state
 
 echo
-echo "install.sh complete. Robot is still in stock/cloud mode — nothing has been redirected."
-echo "Run ./activate.sh $HOST when you're ready to switch it into valetudo mode."
+ok "install.sh complete. Robot is still in stock/cloud mode — nothing has been redirected."
+ok "Run ./activate.sh $HOST when you're ready to switch it into valetudo mode."

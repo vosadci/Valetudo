@@ -35,9 +35,9 @@ cd Valetudo
 git checkout feature/karcher-rcv5-vendor-module
 ```
 
-Run every command in the rest of this document from `contrib/karcher-rcv5/`
-inside that checkout, on your Mac/PC — never on the robot — unless a step
-says otherwise.
+Every command below runs on your Mac/PC — never on the robot. Each section
+states explicitly which directory it runs from: the repo root for `npm`/build
+commands, `contrib/karcher-rcv5/` (inside that checkout) for everything else.
 
 ## Installing dependencies
 
@@ -59,6 +59,8 @@ stack). Nothing here is extracted from the Kärcher app; it's a self-signed
 cert generated fresh on your machine, impersonating `*.3irobotix.net`
 purely so `aiot_client` accepts the handshake with your local Valetudo
 instance instead of the real cloud.
+
+From `contrib/karcher-rcv5/`:
 
 ```sh
 python3 gen_cert.py
@@ -98,16 +100,16 @@ for `node22-linuxstatic-armv7` (tens of MB) into `build_dependencies/` —
 this needs network access and can take a few minutes; it looks like a hang
 but isn't. Subsequent builds reuse the cached download.
 
-Confirm the binary exists before continuing:
+Confirm the binary exists before continuing (still from the repo root):
 
 ```sh
-ls -la ../../build/armv7/valetudo
+ls -la build/armv7/valetudo
 ```
 
 ## Installing on the robot
 
-Replace `<robot-ip>` below with your robot's actual LAN IP throughout (e.g.
-`192.168.1.42`).
+From `contrib/karcher-rcv5/`. Replace `<robot-ip>` below with your robot's
+actual LAN IP throughout (e.g. `192.168.1.42`).
 
 **1. Stage everything.** Pushes the Valetudo binary, wrapper scripts, dev
 certs, and the boot-autostart hook; takes a backup of the robot's original
@@ -141,6 +143,12 @@ local Valetudo dummycloud and persists that choice so it survives a reboot.
 ./activate.sh <robot-ip>
 ```
 
+The very first time you run this against a given robot (or any time after
+`aiot-gate.sh overlay off` or a factory reset), it also arms the `/oem`
+overlay it needs to write certs there and reboots the robot automatically —
+expect this run to take a minute or two longer than usual while it waits for
+the robot to come back up. Every run after that is fast, no reboot.
+
 **3. Verify.** Open `http://<robot-ip>` (or whatever the robot's IP is)
 in a browser — you should see the map and controls. If you don't, see
 Troubleshooting below.
@@ -167,6 +175,8 @@ mode file" below for why that's reliable across reboots.
 
 ## Uninstalling
 
+From `contrib/karcher-rcv5/`:
+
 ```sh
 ./uninstall.sh <robot-ip>            # switch back to stock, remove the boot hook, keep the binary/certs
 ./uninstall.sh <robot-ip> --purge    # same, and also delete /userdata/valetudo entirely
@@ -178,13 +188,71 @@ Either way, the three irreplaceable backup files under `/userdata/` (see
 ## Disaster recovery
 
 If a factory reset (or anything else) wipes `/userdata`, restore the
-Mac-side backups first, then re-provision:
+Mac-side backups first, then re-provision. From `contrib/karcher-rcv5/`:
 
 ```sh
 ./restore-originals.sh <robot-ip>
 ./install.sh <robot-ip>
 ./activate.sh <robot-ip>
 ```
+
+## Recovering from a WiFi/config reset
+
+Three different ways to trigger a reset on this robot were all live-tested 2026-09-21
+and land on the same **shallow** wipe — shallower than a full `/userdata` factory
+reset:
+
+1. The Kärcher app's "reset and remove robot" action.
+2. Holding both of the robot's top physical buttons together for 5+ seconds (announces
+   "network and wifi configuration mode").
+3. The small recessed reset button under the main cover (announces "System has been
+   restored").
+
+All three clear `/userdata/config`, `/userdata/log`, and `/userdata/cfg` (WiFi
+credentials included) and drop the robot back into an unpaired, no-WiFi state — but
+none of them touch `/userdata/debug_mode`. Symptom: SSH stops working (no network to
+reach it over), but `adb` over the internal USB OTG port still works, and root is
+intact.
+
+To get WiFi back without going through the app's SoftAP re-pairing flow:
+`wpa_supplicant` is already running (`S66_wifi` starts it at boot regardless of whether
+any network is configured), so reconfigure it live over its control socket:
+
+```sh
+adb shell
+wpa_cli -i wlan0 add_network                        # returns a network id, e.g. 0
+wpa_cli -i wlan0 set_network 0 ssid '"YourSSID"'     # literal quotes required
+wpa_cli -i wlan0 set_network 0 psk '"YourPassword"'
+wpa_cli -i wlan0 enable_network 0
+wpa_cli -i wlan0 select_network 0
+wpa_cli -i wlan0 save_config                         # persists to /userdata/cfg/wpa_supplicant.conf
+```
+
+`dhcpcd` (`S41dhcpcd`) already runs as a persistent daemon watching every interface, so
+it picks up the new link automatically — no separate DHCP step, no reboot needed. Check
+with `wpa_cli -i wlan0 status` (look for `wpa_state=COMPLETED`) and `ifconfig wlan0`.
+
+Once SSH is back, treat it like any other `/userdata` wipe — see "Disaster recovery"
+above if `/userdata/valetudo` itself also needs restoring.
+
+**`/userdata/config/wifi.conf` is a separate problem from the WiFi network itself.**
+The `wpa_cli` recipe above only restores the robot's *network* connectivity (`ssid`/
+`psk`). The same reset also wipes `wifi.conf`'s cloud-pairing fields — `uid`, `key`,
+`district`, `http_host`, `mqtt_host` — which `aiot_client` needs to log in at all (see
+"Fields now show in Valetudo" history in this repo). **`key` and `district` are
+pairing-session values the cloud reissues on every fresh pairing, not fixed per-device
+secrets** — live-confirmed 2026-09-21: hand-restoring them from an old backup got the
+robot fully connected (login, MQTT, map/log uploads all worked), but every remote
+command silently did nothing for the rest of that session, while the physical
+Start button worked normally throughout. Root cause was never fully isolated (the
+robot's firmware had also reverted to an older version across the same reset, which
+is at least as likely an explanation as the stale pairing fields), but re-pairing
+through the official Kärcher app's SoftAP flow immediately fixed it.
+
+**If a robot recovered this way connects and uploads fine but ignores every command
+from the UI while the physical button still works, don't keep debugging Valetudo —
+re-pair it through the official app first**, then re-run `karcher-cloud-switch.sh
+valetudo` (it never touches `wifi.conf`, so the fresh pairing carries over).
 
 ## Troubleshooting
 
