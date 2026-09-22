@@ -39,7 +39,12 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             cleaning_area: undefined,
             // Needed by KaercherMapSegmentationCapability's set_preference calls
             // (doc/PROTOCOL.md §14) — the preference table is keyed per map_id.
-            current_map_id: undefined
+            current_map_id: undefined,
+            // Read by KaercherSpeakerVolumeControlCapability.getVolume() — no
+            // synchronous query exists, only cached prop.post/prop.get pushes.
+            // `alarm` isn't cached separately: KaercherSpeakerVolumeControlCapability
+            // derives it from `volume` rather than reading the device's own echo back.
+            volume: undefined
         };
 
         const knownIdentity = this.readKnownIdentity();
@@ -109,6 +114,8 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             capabilities.KaercherFanSpeedControlCapability,
             capabilities.KaercherWaterUsageControlCapability,
             capabilities.KaercherOperationModeControlCapability,
+            capabilities.KaercherSpeakerTestCapability,
+            capabilities.KaercherSpeakerVolumeControlCapability,
             capabilities.KaercherConsumableMonitoringCapability,
             capabilities.KaercherCurrentStatisticsCapability,
             capabilities.KaercherMapSegmentationCapability,
@@ -280,7 +287,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
                 statusRelevant = true;
             }
         }
-        for (const key of ["main_brush", "side_brush", "hypa", "mop_life", "current_map_id", "cleaning_time", "cleaning_area"]) {
+        for (const key of ["main_brush", "side_brush", "hypa", "mop_life", "current_map_id", "cleaning_time", "cleaning_area", "volume"]) {
             if (data[key] !== undefined) {
                 this.ephemeralState[key] = data[key];
             }

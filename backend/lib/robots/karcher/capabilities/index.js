@@ -6,6 +6,8 @@ module.exports = {
     KaercherFanSpeedControlCapability: require("./KaercherFanSpeedControlCapability"),
     KaercherMapSegmentationCapability: require("./KaercherMapSegmentationCapability"),
     KaercherOperationModeControlCapability: require("./KaercherOperationModeControlCapability"),
+    KaercherSpeakerTestCapability: require("./KaercherSpeakerTestCapability"),
+    KaercherSpeakerVolumeControlCapability: require("./KaercherSpeakerVolumeControlCapability"),
     KaercherWaterUsageControlCapability: require("./KaercherWaterUsageControlCapability"),
     KaercherZoneCleaningCapability: require("./KaercherZoneCleaningCapability")
 };
