@@ -29,6 +29,7 @@ import {
     fetchMQTTProperties,
     fetchNTPClientConfiguration,
     fetchNTPClientStatus,
+    fetchObstacleAvoidanceControlProperties,
     fetchObstacleAvoidanceControlState,
     fetchPersistentMapState,
     fetchPresetSelections,
@@ -276,6 +277,7 @@ enum QueryKey {
     AutoEmptyDockAutoEmptyDurationControl = "auto_empty_dock_auto_empty_duration_control",
     AutoEmptyDockAutoEmptyDurationControlProperties = "auto_empty_dock_auto_empty_duration_control_properties",
     MapAnnotationsProperties = "map_annotations_properties",
+    ObstacleAvoidanceProperties = "obstacle_avoidance_properties",
 }
 
 const useOnCommandError = (capability: Capability | string): ((error: unknown) => void) => {
@@ -1162,6 +1164,15 @@ export const useObstacleAvoidanceControlMutation = () => {
             return sendObstacleAvoidanceControlState(enable).then(fetchObstacleAvoidanceControlState);
         },
         onError: useOnCommandError(Capability.ObstacleAvoidanceControl)
+    });
+};
+
+export const useObstacleAvoidanceControlPropertiesQuery = () => {
+    return useQuery({
+        queryKey: [QueryKey.ObstacleAvoidanceProperties],
+        queryFn: fetchObstacleAvoidanceControlProperties,
+
+        staleTime: Infinity
     });
 };
 

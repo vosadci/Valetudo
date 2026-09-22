@@ -25,6 +25,8 @@ describe("KaercherRCV5ValetudoRobot", () => {
             Object.keys(robot.capabilities).sort(),
             [
                 "BasicControlCapability",
+                "CarpetModeControlCapability",
+                "CarpetSensorModeControlCapability",
                 "CombinedVirtualRestrictionsCapability",
                 "ConsumableMonitoringCapability",
                 "CurrentStatisticsCapability",
@@ -32,7 +34,9 @@ describe("KaercherRCV5ValetudoRobot", () => {
                 "MapSegmentEditCapability",
                 "MapSegmentRenameCapability",
                 "MapSegmentationCapability",
+                "ObstacleAvoidanceControlCapability",
                 "OperationModeControlCapability",
+                "QuirksCapability",
                 "SpeakerTestCapability",
                 "SpeakerVolumeControlCapability",
                 "WaterUsageControlCapability",
@@ -159,6 +163,21 @@ describe("KaercherRCV5ValetudoRobot", () => {
         robot.parseAndUpdateState({privacy: {map_uploads: 0, record_uploads: 0, carpet_show: 1}});
 
         assert.strictEqual(sent.length, 0);
+    });
+
+    it("caches ephemeralState.privacy as a merge, not a replace, across partial pushes", () => {
+        // The APK sends one privacy sub-field at a time (CarpetSettingVM.setCarpetTurbo
+        // etc.), so a partial echo/push must not blank out sibling fields already known.
+        const robot = buildRobot();
+
+        assert.strictEqual(robot.ephemeralState.privacy, undefined);
+
+        robot.parseAndUpdateState({privacy: {carpet_turbo: 1}});
+        assert.strictEqual(robot.ephemeralState.privacy.carpet_turbo, 1);
+
+        robot.parseAndUpdateState({privacy: {carpet_avoid: 1}});
+        assert.strictEqual(robot.ephemeralState.privacy.carpet_turbo, 1, "carpet_turbo must survive a sibling-only push");
+        assert.strictEqual(robot.ephemeralState.privacy.carpet_avoid, 1);
     });
 
     describe("isZoneCleanActive", () => {

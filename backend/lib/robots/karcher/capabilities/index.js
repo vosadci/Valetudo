@@ -1,6 +1,8 @@
 module.exports = {
     KaercherAutoEmptyDockManualTriggerCapability: require("./KaercherAutoEmptyDockManualTriggerCapability"),
     KaercherBasicControlCapability: require("./KaercherBasicControlCapability"),
+    KaercherCarpetModeControlCapability: require("./KaercherCarpetModeControlCapability"),
+    KaercherCarpetSensorModeControlCapability: require("./KaercherCarpetSensorModeControlCapability"),
     KaercherCombinedVirtualRestrictionsCapability: require("./KaercherCombinedVirtualRestrictionsCapability"),
     KaercherConsumableMonitoringCapability: require("./KaercherConsumableMonitoringCapability"),
     KaercherCurrentStatisticsCapability: require("./KaercherCurrentStatisticsCapability"),
@@ -8,6 +10,7 @@ module.exports = {
     KaercherMapSegmentEditCapability: require("./KaercherMapSegmentEditCapability"),
     KaercherMapSegmentRenameCapability: require("./KaercherMapSegmentRenameCapability"),
     KaercherMapSegmentationCapability: require("./KaercherMapSegmentationCapability"),
+    KaercherObstacleAvoidanceControlCapability: require("./KaercherObstacleAvoidanceControlCapability"),
     KaercherOperationModeControlCapability: require("./KaercherOperationModeControlCapability"),
     KaercherSpeakerTestCapability: require("./KaercherSpeakerTestCapability"),
     KaercherSpeakerVolumeControlCapability: require("./KaercherSpeakerVolumeControlCapability"),

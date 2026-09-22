@@ -11,12 +11,15 @@ Protocol facts are sourced from the `karcher-rcv5-ha` repo's
 device). Citations below are file + section, not line numbers, since that
 repo evolves independently of this one.
 
-**Last updated:** 2026-09-22 (`CombinedVirtualRestrictionsCapability` write side implemented —
-add/edit/delete of walls, no-go, and no-mop zones from Valetudo's own map editor, live-confirmed
-on-device. `SpeakerVolumeControlCapability` + `SpeakerTestCapability` implemented and
-live-confirmed. `MapSegmentEditCapability` (merge/split) and `MapSegmentRenameCapability` both
-implemented and live-confirmed, including a device-level split limitation reproduced in the
-official app)
+**Last updated:** 2026-09-22 (`CarpetModeControlCapability`, `CarpetSensorModeControlCapability`,
+`ObstacleAvoidanceControlCapability`, and a `QuirksCapability` carpet-display quirk implemented —
+all four reuse existing core capability types rather than needing new Valetudo taxonomy; built
+and unit-tested, **not yet live-tested**. Before that: `CombinedVirtualRestrictionsCapability`
+write side implemented — add/edit/delete of walls, no-go, and no-mop zones from Valetudo's own
+map editor, live-confirmed on-device. `SpeakerVolumeControlCapability` + `SpeakerTestCapability`
+implemented and live-confirmed. `MapSegmentEditCapability` (merge/split) and
+`MapSegmentRenameCapability` both implemented and live-confirmed, including a device-level split
+limitation reproduced in the official app)
 
 ## Legend
 
@@ -30,7 +33,7 @@ official app)
 | ❌ | Excluded — hardware/model gate, or the pipeline is closed by design |
 | ❔ | No evidence either way |
 
-## Currently implemented (14)
+## Currently implemented (18)
 
 `KaercherBasicControlCapability`, `KaercherFanSpeedControlCapability`,
 `KaercherWaterUsageControlCapability`, `KaercherOperationModeControlCapability`,
@@ -38,7 +41,11 @@ official app)
 `KaercherConsumableMonitoringCapability`, `KaercherAutoEmptyDockManualTriggerCapability`,
 `KaercherCurrentStatisticsCapability`, `KaercherCombinedVirtualRestrictionsCapability`,
 `KaercherSpeakerVolumeControlCapability`, `KaercherSpeakerTestCapability`,
-`KaercherMapSegmentEditCapability`, `KaercherMapSegmentRenameCapability`.
+`KaercherMapSegmentEditCapability`, `KaercherMapSegmentRenameCapability`,
+`KaercherCarpetModeControlCapability`, `KaercherCarpetSensorModeControlCapability`,
+`KaercherObstacleAvoidanceControlCapability` — plus a bare core `QuirksCapability`
+(no Kärcher-specific subclass needed) fed one quirk from `KaercherQuirkFactory.js`.
+**Not yet live-tested** — built and unit-tested only, see the per-row notes below.
 
 ## Full map
 
@@ -77,11 +84,11 @@ official app)
 
 | Capability | Status | Detail |
 |---|---|---|
-| `CarpetModeControlCapability` | 🟩 | `prop.set {"privacy":{"carpet_turbo":0\|1}}` — APK-verified (`CarpetSettingVM.java`) |
-| `CarpetSensorModeControlCapability` | 🟩 | `privacy.carpet_avoid` — same source |
+| `CarpetModeControlCapability` | ✅ | Implemented 2026-09-22 (`KaercherCarpetModeControlCapability`) — `prop.set {"privacy":{"carpet_turbo":0\|1}}`, APK-verified (`CarpetSettingVM.java`). "Suction boost when the robot detects carpet" — this core capability's existing WebUI copy already describes it near-verbatim. Read side caches `ephemeralState.privacy` as a **merge**, not a replace (the device echoes one privacy field at a time). Not yet live-tested |
+| `CarpetSensorModeControlCapability` | ✅ | Implemented 2026-09-22 (`KaercherCarpetSensorModeControlCapability`) — `privacy.carpet_avoid`, same source. RCV5 only supports a binary avoid/don't-avoid choice (ultrasound carpet detection during wet cleaning, `doc/INVESTIGATION.md`'s sensor table), so `getProperties().supportedModes` is restricted to `[off, avoid]` — no mop-lift/mop-detach mechanism exists to map onto this capability's `lift`/`detach` modes. Not yet live-tested |
 | `FloorMaterialDirectionAwareNavigationControlCapability` | ❌ | no equivalent; RCV5 is LiDAR SLAM |
 | `CollisionAvoidantNavigationControlCapability` | ❌ | no togglable nav-style property found |
-| `ObstacleAvoidanceControlCapability` | 🟩 | **Corrected 2026-09-20** — previously marked ❌ by conflating this with RVF7's Agora live-video streaming. RCV5 has its own on-device `Ai-server` component that classifies obstacles from camera frames locally (`doc/INVESTIGATION.md` §"Camera — positive APK evidence", `doc/LOCAL_CONTROL.md` process table), gated by a single flag: `prop.set {"privacy":{"ai_recognize":0\|1}}`. Structurally a plain `SimpleToggleCapability`. Note: the map now shows *where* detected objects are (see below) — that's independent of this still-unimplemented on/off toggle |
+| `ObstacleAvoidanceControlCapability` | ✅ | Implemented 2026-09-22 (`KaercherObstacleAvoidanceControlCapability`). **Corrected 2026-09-20** — previously marked ❌ by conflating this with RVF7's Agora live-video streaming. RCV5 has its own on-device `Ai-server` component that classifies obstacles from camera frames locally (`doc/INVESTIGATION.md` §"Camera — positive APK evidence", `doc/LOCAL_CONTROL.md` process table), gated by a single flag: `prop.set {"privacy":{"ai_recognize":0\|1}}`. Structurally a plain `SimpleToggleCapability`; this core capability's existing WebUI copy ("Avoid obstacles using sensors such as lasers or cameras. May suffer from false positives.") is an honest match, though it's a semantic stretch from "obstacle avoidance" to "AI object recognition" worth knowing about when reading the WebUI. `getProperties()` additionally reports `detectableTypes` (from `KaercherConst.AI_OBJECT_TYPE_LABELS` — the map parser's own verified list, not the APK's separate onboarding-screen list, which diverges: adds Bar chairs/Weight scales, omits Cat/Dog/Pet waste), surfaced in `RobotOptions.tsx`'s description text generically (falls back to the plain description for every other vendor when absent). Note: the map already shows *where* detected objects are (see below) — that's independent of this toggle. Not yet live-tested |
 | `ObstacleImagesCapability` | ❌ | not "no camera" — the pipeline is closed by design. No frame or image ever leaves the device in shipped firmware (privacy-by-design, confirmed independently at both the app layer and the firmware layer). Not reachable without firmware modification |
 | `PetObstacleAvoidanceControlCapability` | ❌ | `ai_recognize`'s detected classes (shoes, socks, cable, chair, scale) don't include a pet-specific class; this is generic obstacle avoidance, not pet-specific |
 
@@ -133,7 +140,7 @@ official app)
 | `CameraLightControlCapability` | ❌ | no property found |
 | `KeyLockCapability` | ❔ | no lock/child-lock property found |
 | `DuststreamingCapability` | ❔ | no particulate-sensor stream property found |
-| `QuirksCapability` | — | **the designed home for the orphans below**, not a shrug |
+| `QuirksCapability` | ✅ | Implemented 2026-09-22 — bare core `QuirksCapability`, no Kärcher subclass needed, fed one quirk from `KaercherQuirkFactory.js` (mirrors `ViomiQuirkFactory.js`'s pattern). Currently just "Carpet Display" (`privacy.carpet_show`, see the orphans table below for why this landed here rather than a new capability type). Not exposed over MQTT (no `QuirksCapability` entry in `HandleMappings.js` for any vendor — by design, same as every other vendor's Quirks). **The designed home for further orphans below**, not a shrug. Not yet live-tested |
 
 ## Orphans — features with no dedicated Valetudo capability
 
@@ -144,7 +151,7 @@ this — vendor-specific toggles bundled into one class instead of left unimplem
 | Feature | Protocol detail |
 |---|---|
 | Per-room cleaning cycles (x1/x2) *and* the global "Double cleaning" toggle | Same underlying field: `repeat` (`0`/`1`/`2` = single/double/triple) inside `set_preference`'s room-preference array. The global toggle is almost certainly the non-Customise-mode default for the same field |
-| Carpet display toggle | `privacy.carpet_show` |
+| ~~Carpet display toggle~~ | ✅ **Implemented 2026-09-22** as a `QuirksCapability` quirk (`privacy.carpet_show`, `KaercherQuirkFactory.js`) — see the Misc table above. Whether this only affects the Kärcher app's own map rendering or also changes what the robot marks in the map data Valetudo receives is unverified either way; Valetudo's own carpet rendering (`KaercherMapParser.DECODE_CELL`) reads grid bytes unconditionally regardless of this flag |
 | Voice on/off (distinct from volume) | Likely the `sound` property (in the stream, values unconfirmed) |
 | Robot leveling calibration (off-dock only) | `set_calibration`, in the APK command table |
 | Schedules | **Not actually a gap** — Valetudo schedules locally in core, independent of any vendor capability |
@@ -258,9 +265,9 @@ the user, not made inline from this one.
 5. ~~`MapSegmentEditCapability` + `MapSegmentRenameCapability`~~ — done, 2026-09-22, all live-confirmed
 6. `LocateCapability` — `find_device`
 7. `DoNotDisturbCapability` — quiet mode
-8. `CarpetModeControlCapability` + `CarpetSensorModeControlCapability` — `privacy.carpet_turbo`/`carpet_avoid`
+8. ~~`CarpetModeControlCapability` + `CarpetSensorModeControlCapability`~~ — done, 2026-09-22 (not yet live-tested)
 9. `VoicePackManagementCapability` — `voice_type`
-10. `ObstacleAvoidanceControlCapability` — `privacy.ai_recognize`
+10. ~~`ObstacleAvoidanceControlCapability`~~ — done, 2026-09-22, plus a `QuirksCapability` carpet-display quirk (not yet live-tested)
 
 Everything 🟨 or 🔶 needs one live MQTT capture before shipping — don't
 implement against APK-only payloads. The single highest-value capture is the

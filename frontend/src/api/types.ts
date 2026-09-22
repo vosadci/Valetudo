@@ -625,6 +625,12 @@ export interface CarpetSensorModeControlProperties {
     supportedModes: Array<CarpetSensorMode>
 }
 
+// Optional and vendor-specific: not every implementation of ObstacleAvoidanceControlCapability
+// knows what object types it recognizes, so this is empty ({}) rather than a required field.
+export interface ObstacleAvoidanceControlCapabilityProperties {
+    detectableTypes?: Array<string>
+}
+
 export type AutoEmptyDockAutoEmptyInterval = "off" | "infrequent" | "normal" | "frequent" ;
 
 export interface AutoEmptyDockAutoEmptyIntervalPayload {

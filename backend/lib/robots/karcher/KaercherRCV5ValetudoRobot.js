@@ -5,9 +5,11 @@ const entities = require("../../entities");
 const KaercherAiotDummycloud = require("./KaercherAiotDummycloud");
 const KaercherConst = require("./KaercherConst");
 const KaercherMapParser = require("./KaercherMapParser");
+const KaercherQuirkFactory = require("./KaercherQuirkFactory");
 const KaercherStateDerivation = require("./KaercherStateDerivation");
 const KaercherStaticTLSContext = require("./KaercherStaticTLSContext");
 const Logger = require("../../Logger");
+const QuirksCapability = require("../../core/capabilities/QuirksCapability");
 const ValetudoRobot = require("../../core/ValetudoRobot");
 const ValetudoRobotError = require("../../entities/core/ValetudoRobotError");
 
@@ -51,7 +53,14 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             // synchronous query exists, only cached prop.post/prop.get pushes.
             // `alarm` isn't cached separately: KaercherSpeakerVolumeControlCapability
             // derives it from `volume` rather than reading the device's own echo back.
-            volume: undefined
+            volume: undefined,
+            // Read by KaercherCarpetModeControlCapability, KaercherCarpetSensorModeControlCapability,
+            // KaercherObstacleAvoidanceControlCapability, and KaercherQuirkFactory's
+            // carpet_show quirk. Merged (not replaced) in parseAndUpdateState — the
+            // APK sends one privacy sub-field at a time (e.g. CarpetSettingVM.
+            // setCarpetTurbo only puts "carpet_turbo" in its payload), so a naive
+            // replace would blank the other three fields on every partial echo.
+            privacy: undefined
         };
 
         const knownIdentity = this.readKnownIdentity();
@@ -129,7 +138,10 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             capabilities.KaercherZoneCleaningCapability,
             capabilities.KaercherCombinedVirtualRestrictionsCapability,
             capabilities.KaercherMapSegmentEditCapability,
-            capabilities.KaercherMapSegmentRenameCapability
+            capabilities.KaercherMapSegmentRenameCapability,
+            capabilities.KaercherCarpetModeControlCapability,
+            capabilities.KaercherCarpetSensorModeControlCapability,
+            capabilities.KaercherObstacleAvoidanceControlCapability
         ];
 
         if (this.knownHasAutoEmptyDock === true) {
@@ -139,6 +151,14 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
         capabilitiesToRegister.forEach(capability => {
             this.registerCapability(new capability({robot: this}));
         });
+
+        const quirkFactory = new KaercherQuirkFactory({robot: this});
+        this.registerCapability(new QuirksCapability({
+            robot: this,
+            quirks: [
+                quirkFactory.getQuirk(KaercherQuirkFactory.KNOWN_QUIRKS.CARPET_DISPLAY)
+            ]
+        }));
 
         this.state.upsertFirstMatchingAttribute(new stateAttrs.StatusStateAttribute({
             value: stateAttrs.StatusStateAttribute.VALUE.IDLE
@@ -301,6 +321,12 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             if (data[key] !== undefined) {
                 this.ephemeralState[key] = data[key];
             }
+        }
+
+        // Merged, not replaced — see the ephemeralState.privacy comment in the
+        // constructor for why a straight assignment would lose sibling fields.
+        if (data.privacy !== undefined) {
+            this.ephemeralState.privacy = {...this.ephemeralState.privacy, ...data.privacy};
         }
 
         // A previous revision of this code force-set map_uploads/record_uploads to
