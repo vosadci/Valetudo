@@ -5,6 +5,8 @@ module.exports = {
     KaercherConsumableMonitoringCapability: require("./KaercherConsumableMonitoringCapability"),
     KaercherCurrentStatisticsCapability: require("./KaercherCurrentStatisticsCapability"),
     KaercherFanSpeedControlCapability: require("./KaercherFanSpeedControlCapability"),
+    KaercherMapSegmentEditCapability: require("./KaercherMapSegmentEditCapability"),
+    KaercherMapSegmentRenameCapability: require("./KaercherMapSegmentRenameCapability"),
     KaercherMapSegmentationCapability: require("./KaercherMapSegmentationCapability"),
     KaercherOperationModeControlCapability: require("./KaercherOperationModeControlCapability"),
     KaercherSpeakerTestCapability: require("./KaercherSpeakerTestCapability"),

@@ -7,53 +7,22 @@ const ValetudoRestrictedZone = require("../../../entities/core/ValetudoRestricte
 /**
  * doc/PROTOCOL.md "set_virtual_wall": `service_invoke/set_virtual_wall`,
  * `{"virwall": [<count>, [id, type, x1,y1,x2,y2,x3,y3,x4,y4], ...]}`.
+ * `type`: `1`=no-go, `2`=line wall, `6`=no-mop — same codes on both the
+ * send and read/echo sides. A wall (2 logical endpoints) still fills all
+ * 4 point slots, each endpoint duplicated (`[A, A, B, B]`), matching what
+ * the device itself sends on the read side.
  *
- * Decoded 2026-09-22 straight from the RCV5 `I3.12.90` firmware binary
- * (`RobotApp`, `everest::net::CAiotParseBuf::parseSetVirtualWallReq`,
- * `0x4ae0fc`), cross-validated against the decompiled APK (v1.4.32,
- * `WallSettingActivity`/`GlobalRender`) and `doc/MAP_DATA.md`'s independently
- * sourced `DeviceAreaDataInfo` protobuf descriptor.
- *
- * **No-mop send type is `6`, confirmed live (2026-09-22+).** The APK's own
- * UI code (`WallSettingActivity.java:161`, `addWallArea(true, 3)` →
- * `AreaMap.mCleanType` → `GlobalRender.getAreaDataNew():1293`) suggested `3`
- * on the send path, distinct from the device-capture-confirmed no-mop echo
- * code `6` (`doc/MAP_DATA.md` §6.7) — that static-analysis inference turned
- * out wrong. Live-tested: sending `3` rendered the zone as red (not the
- * distinct no-mop color) after save and the robot avoided it entirely
- * (no-go behavior, not mop-skip) — i.e. the device didn't recognize `3` and
- * fell back to no-go on both the read side (`KaercherMapParser`'s own
- * fallthrough: anything that isn't `type 6` renders as `NO_GO_AREA`) and,
- * apparently, in whatever algorithm consumer actually decides avoidance
- * behavior. Sending `6` (the same value used and confirmed on the read/echo
- * side) is what actually works. `parseSetVirtualWallReq` copies `wall[1]`
- * straight into `DeviceAreaDataInfo.type` with no remapping, so this is
- * simply the correct value, not a re-code. No-go (`1`) and line wall (`2`)
- * were correct as originally derived. A wall (2 real endpoints) still needs
- * all 4 point slots filled; the read side found the real device duplicates
- * each endpoint (`[A, A, B, B]`) rather than sending 2 points, so the same
- * shape is mirrored here on the way out — also live-confirmed working
- * (add/edit/delete all verified end-to-end for walls and zones).
- *
- * **Add, edit, and delete are all live-confirmed working (2026-09-22).**
- * Re-sending an existing `areaindex` with new points updates it in place —
- * `status`/`map_id`/`type` on the wire protobuf are all hardcoded constants
- * on the device side, never read from this payload. No explicit delete
- * opcode was ever found in the decoded firmware path, so this capability
- * follows the same full desired-state-replace design Roborock's `save_map`
- * uses (`RoborockCombinedVirtualRestrictionsCapability`): every call
- * re-sends the *entire* current set of walls/zones with freshly assigned
- * sequential ids, one `set_virtual_wall` call fully replacing what's
- * registered for the map. Live testing confirmed this is exactly right —
- * omitting a previously-sent `areaindex` does delete it device-side, for
- * both walls and zones.
+ * Add, edit, and delete of line walls, no-go areas, and no-mop areas are
+ * all live-confirmed working end-to-end against a real RCV5. Re-sending an
+ * existing `areaindex` with new points updates it in place. There's no
+ * separate delete opcode — this capability follows a full desired-state-
+ * replace design, the same pattern Roborock's `save_map` uses
+ * (`RoborockCombinedVirtualRestrictionsCapability`): every call re-sends
+ * the *entire* current set of walls/zones with freshly assigned sequential
+ * ids, and omitting a previously-sent `areaindex` deletes it device-side.
  *
  * Coordinate transform: reuses `KaercherMapParser.VALETUDO_PIXELS_TO_WORLD`,
- * the same helper `KaercherZoneCleaningCapability` uses. Live-confirmed
- * correct here (zones land where drawn, robot avoids the right area) —
- * strong evidence `KaercherZoneCleaningCapability`'s own use of the same
- * transform is also correct, though that capability hasn't been separately
- * live-tested itself.
+ * the same helper `KaercherZoneCleaningCapability` uses.
  *
  * @extends CombinedVirtualRestrictionsCapability<import("../KaercherRCV5ValetudoRobot")>
  */

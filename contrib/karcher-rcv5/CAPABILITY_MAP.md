@@ -11,7 +11,12 @@ Protocol facts are sourced from the `karcher-rcv5-ha` repo's
 device). Citations below are file + section, not line numbers, since that
 repo evolves independently of this one.
 
-**Last updated:** 2026-09-21 (`CurrentStatisticsCapability` implemented; map now renders virtual walls, no-go/no-mop zones, carpet, and AI-object markers — all live-confirmed on-device. Carpet: the privacy-consent theory was wrong and has been reverted — root cause is that the RCV5 encodes carpet as grid bytes, not `furniture_info`; parser now splits those bytes into their own carpet-textured map layers)
+**Last updated:** 2026-09-22 (`CombinedVirtualRestrictionsCapability` write side implemented —
+add/edit/delete of walls, no-go, and no-mop zones from Valetudo's own map editor, live-confirmed
+on-device. `SpeakerVolumeControlCapability` + `SpeakerTestCapability` implemented and
+live-confirmed. `MapSegmentEditCapability` (merge/split) and `MapSegmentRenameCapability` both
+implemented and live-confirmed, including a device-level split limitation reproduced in the
+official app)
 
 ## Legend
 
@@ -25,13 +30,15 @@ repo evolves independently of this one.
 | ❌ | Excluded — hardware/model gate, or the pipeline is closed by design |
 | ❔ | No evidence either way |
 
-## Currently implemented (9)
+## Currently implemented (14)
 
 `KaercherBasicControlCapability`, `KaercherFanSpeedControlCapability`,
 `KaercherWaterUsageControlCapability`, `KaercherOperationModeControlCapability`,
 `KaercherZoneCleaningCapability`, `KaercherMapSegmentationCapability`,
 `KaercherConsumableMonitoringCapability`, `KaercherAutoEmptyDockManualTriggerCapability`,
-`KaercherCurrentStatisticsCapability`.
+`KaercherCurrentStatisticsCapability`, `KaercherCombinedVirtualRestrictionsCapability`,
+`KaercherSpeakerVolumeControlCapability`, `KaercherSpeakerTestCapability`,
+`KaercherMapSegmentEditCapability`, `KaercherMapSegmentRenameCapability`.
 
 ## Full map
 
@@ -43,7 +50,7 @@ repo evolves independently of this one.
 | `FanSpeedControlCapability` | ✅ | `wind` presets |
 | `WaterUsageControlCapability` | ✅ | `water` presets |
 | `OperationModeControlCapability` | ✅ | vacuum/mop/vacuum+mop |
-| `ZoneCleaningCapability` | ✅ | ships, but the coordinate transform (`set_zone_points`/`set_zone_clean`) is APK-derived and uncaptured |
+| `ZoneCleaningCapability` | ✅ | `set_zone_points`/`set_zone_clean`, coordinate transform live-confirmed 2026-09-18 |
 | `GoToLocationCapability` | 🟨 | `set_point_clean`/`start_point_clean` in the APK command table, payload never captured. Ambiguous vs. "clean a spot" below — needs one live capture to settle whether that app feature is this or a small `ZoneCleaningCapability` rectangle |
 | `ManualControlCapability` | 🔶 | **Corrected 2026-09-20** — previously marked ❌ on the strength of `set_direction` being tagged "RCV2 only" in the APK command table. That's superseded by RobotApp disassembly (`CAiotParseBuf::parseSetRemoteCtrlReq`, `SetRemoteControl` cloud op): `direction`/`ctrlValue` are parsed straight into the motion layer, independent of that APK string. Matches the app's own four-direction, hold-to-move joystick. Firmware-confirmed; MQTT method name and payload shape not yet captured |
 | `HighResolutionManualControlCapability` | ❌ | the joystick is discrete 4-direction, not continuous — `ManualControlCapability` is the right shape |
@@ -56,9 +63,9 @@ repo evolves independently of this one.
 |---|---|---|
 | `MapSegmentationCapability` | ✅ | room list + `app_segment_clean` |
 | `MapResetCapability` | 🟨 | `reset_map` in the APK command table, payload uncaptured |
-| `CombinedVirtualRestrictionsCapability` | 🟨 | **Read/display half done 2026-09-20** — `KaercherMapParser` now renders `virtualWalls` as `LineMapEntity`/`PolygonMapEntity` (walls, no-go, no-mop), ported from the HA integration's `map_parser.py`/`map_render.py`. The write half (a `setVirtualRestrictions()` implementation so the WebUI's zone editor can push edits back) still needs `set_virtual_wall`'s payload captured live — same unverified-coordinate caveat as zone cleaning |
-| `MapSegmentEditCapability` (merge/split) | ⬜ | Valetudo has the capability; the RCV5 app does this via map re-upload, no MQTT primitive found |
-| `MapSegmentRenameCapability` | ⬜ | same — app/cloud-side |
+| `CombinedVirtualRestrictionsCapability` | ✅ | Read side (`KaercherMapParser` renders `virtualWalls` as `LineMapEntity`/`PolygonMapEntity`) and write side (`setVirtualRestrictions()`, `set_virtual_wall`) both implemented. Add/edit/delete of walls, no-go, and no-mop zones all live-confirmed 2026-09-22, including correct robot avoidance/mop-skip behavior |
+| `MapSegmentEditCapability` (merge/split) | ✅ | `arrange_room` (merge, exactly 2 segments — matches the interface signature) and `split_room` (straight cut line, world metres). Both live-confirmed 2026-09-22. **Device limitation, reproduced in the official app too, not a Valetudo bug**: `split_room` only works when the cut line runs wall-to-wall — a line starting at, ending at, or crossing a *previous* split's boundary silently fails (no wall cells back that boundary, see `doc/PROTOCOL.md`'s "Room management" section for the full explanation) |
+| `MapSegmentRenameCapability` | ✅ | `rename_room`, single room per call. Live-confirmed 2026-09-22 |
 | `MapSegmentMaterialControlCapability` | ❔ | no per-room floor-material concept in the protocol |
 | `MapAnnotationsCapability` | ❔ | no equivalent found |
 | `MapSnapshotCapability` | ❔/⬜ | closest analog is `upload_by_mapid`/multi-map switching — not a snapshot-restore concept |
@@ -95,6 +102,12 @@ repo evolves independently of this one.
 | `AutoEmptyDockAutoEmptyDurationControlCapability` | ❔ | no config property found — cycle appears fixed |
 | `AutoEmptyDockAutoEmptyIntervalControlCapability` | ❔ | no scheduled/interval auto-empty property found — manual-trigger-only dock as observed |
 
+### Consumables
+
+| Capability | Status | Detail |
+|---|---|---|
+| `ConsumableMonitoringCapability` | ✅ | `main_brush`/`side_brush`/`hypa`/`mop_life` — use-time-elapsed minutes, pushed unprompted in the flat property stream; reset via `service.reset_consumable {consumable: N}` |
+
 ### Stats
 
 | Capability | Status | Detail |
@@ -106,9 +119,9 @@ repo evolves independently of this one.
 
 | Capability | Status | Detail |
 |---|---|---|
-| `SpeakerVolumeControlCapability` | 🟩 | `volume` (0–100) already in the property stream |
+| `SpeakerVolumeControlCapability` | ✅ | `volume` (device scale 0–10) + `alarm` sent together via `prop.set`; `alarm` tracks whether `volume === 0`, live-confirmed 2026-09-22 |
 | `VoicePackManagementCapability` | 🟩 | `voice_type` — well-understood; same command used for the MQTT-injection root exploit |
-| `SpeakerTestCapability` | ❔ | no dedicated test-sound command; `find_device`'s beep is the closest thing but isn't a volume test |
+| `SpeakerTestCapability` | ✅ | reuses `service_invoke/find_device` (no dedicated test-sound command exists); its chirp is governed by the same alarm/volume fields, live-confirmed 2026-09-22 |
 
 ### Misc
 
@@ -150,7 +163,7 @@ real account/device):
 |---|---|---|
 | `virtualWalls` (field 9), `type === 2` | `LineMapEntity.TYPE.VIRTUAL_WALL` | one or more line segments — see the dedup note below. **Live-confirmed 2026-09-20**: no-go, no-mop, and wall all now visible on-device |
 | `virtualWalls`, `type === 1` (no-go) or unmapped | `PolygonMapEntity.TYPE.NO_GO_AREA` | 2-point entries are diagonal rectangle corners, expanded to a box — same convention the app itself uses. Unknown type codes fall through to no-go rather than being dropped |
-| `virtualWalls`, `type === 6` (no-mop) | `PolygonMapEntity.TYPE.NO_MOP_AREA` | device re-codes no-mop to `6` on the report path, not the app's send-path `3` — device-confirmed by the HA integration against a real RCV5 capture, 2026-06-19 |
+| `virtualWalls`, `type === 6` (no-mop) | `PolygonMapEntity.TYPE.NO_MOP_AREA` | `6` is the no-mop code on both the read/echo side (device-confirmed by the HA integration, 2026-06-19) and the write side (`set_virtual_wall`, live-confirmed 2026-09-22) |
 | `furnitureInfo`, `typeId === 1550` | `PolygonMapEntity.TYPE.CARPET` | only the first 4 points of an entry are used, matching the app's own quad-only behaviour; other `typeId`s are real furniture and excluded. **Empty on every RCV5 capture taken so far — this device encodes carpet as grid bytes instead, see below** |
 | `objects`, excluding `objectTypeId === 1005` | `PointMapEntity.TYPE.OBSTACLE` | 1005 is the AI-recognition system's own "carpet" detection, which would otherwise duplicate the `furnitureInfo` polygon. Labelled via `KaercherConst.AI_OBJECT_TYPE_LABELS` (sock/shoe/wire/cat/dog/pet waste/scale/chair), falling back to `Object type N` for anything unmapped |
 
@@ -228,10 +241,6 @@ that room's carpet-flagged cells. `furniture_info` parsing is left in place
 (harmless, may be exercised by other Kärcher models), but is a no-op on every
 RCV5 capture taken so far.
 
-This covers *display* only. Editing restrictions from Valetudo's own WebUI
-(`CombinedVirtualRestrictionsCapability`'s write side) is separate, still
-pending a live `set_virtual_wall` capture — see that row above.
-
 ## Known documentation discrepancy (not fixed here)
 
 `karcher-rcv5-ha`'s `doc/APP_FEATURES.md` (the command table and the "Not
@@ -244,12 +253,14 @@ the user, not made inline from this one.
 
 1. ~~`CurrentStatisticsCapability`~~ — done, 2026-09-20
 2. ~~Map parser: wire up `objects`/`furnitureInfo`/`virtualWalls`~~ — done, 2026-09-20
-3. `LocateCapability` — `find_device`
-4. `SpeakerVolumeControlCapability` — `volume`
-5. `DoNotDisturbCapability` — quiet mode
-6. `CarpetModeControlCapability` + `CarpetSensorModeControlCapability` — `privacy.carpet_turbo`/`carpet_avoid`
-7. `VoicePackManagementCapability` — `voice_type`
-8. `ObstacleAvoidanceControlCapability` — `privacy.ai_recognize`
+3. ~~`SpeakerVolumeControlCapability` + `SpeakerTestCapability`~~ — done, 2026-09-22
+4. ~~`CombinedVirtualRestrictionsCapability` write side~~ — done, 2026-09-22
+5. ~~`MapSegmentEditCapability` + `MapSegmentRenameCapability`~~ — done, 2026-09-22, all live-confirmed
+6. `LocateCapability` — `find_device`
+7. `DoNotDisturbCapability` — quiet mode
+8. `CarpetModeControlCapability` + `CarpetSensorModeControlCapability` — `privacy.carpet_turbo`/`carpet_avoid`
+9. `VoicePackManagementCapability` — `voice_type`
+10. `ObstacleAvoidanceControlCapability` — `privacy.ai_recognize`
 
 Everything 🟨 or 🔶 needs one live MQTT capture before shipping — don't
 implement against APK-only payloads. The single highest-value capture is the

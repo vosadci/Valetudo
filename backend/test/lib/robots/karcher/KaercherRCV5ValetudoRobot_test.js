@@ -25,11 +25,16 @@ describe("KaercherRCV5ValetudoRobot", () => {
             Object.keys(robot.capabilities).sort(),
             [
                 "BasicControlCapability",
+                "CombinedVirtualRestrictionsCapability",
                 "ConsumableMonitoringCapability",
                 "CurrentStatisticsCapability",
                 "FanSpeedControlCapability",
+                "MapSegmentEditCapability",
+                "MapSegmentRenameCapability",
                 "MapSegmentationCapability",
                 "OperationModeControlCapability",
+                "SpeakerTestCapability",
+                "SpeakerVolumeControlCapability",
                 "WaterUsageControlCapability",
                 "ZoneCleaningCapability"
             ],

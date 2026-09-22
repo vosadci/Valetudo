@@ -107,19 +107,29 @@ const FURNITURE_CARPET_TYPE_ID = 1550;
 const OBJECT_TYPE_CARPET = 1005;
 
 /**
- * RobotMap.virtual_walls (DeviceAreaDataInfo.type) restriction kinds. NOT the same
- * values the app itself sends when creating one (1=no-go, 2=line wall, 3=no-mop,
- * per APK WallSettingActivity) — the device re-codes no-mop to 6 on the report
- * path, confirmed against a real RCV5 capture 2026-06-19. Only virtual_walls (field
- * 9) carries restrictions; RobotMap.areas_info (field 10) is a different concept
- * (the currently-drawn zone-clean rectangle) and must not be treated as one — doing
- * so once made a drawn clean area render as a phantom no-go zone in the HA
- * integration. Unknown/unmapped type codes fall through to ZONE_TYPE_NOGO, so
- * areas still surface even for a type this table doesn't know about yet.
+ * RobotMap.virtual_walls (DeviceAreaDataInfo.type) restriction kinds — same codes
+ * on both the read/echo side and the send side (set_virtual_wall), device-confirmed
+ * both directions. Only virtual_walls (field 9) carries restrictions;
+ * RobotMap.areas_info (field 10) is a different concept (the currently-drawn
+ * zone-clean rectangle) and must not be treated as one — doing so once made a drawn
+ * clean area render as a phantom no-go zone in the HA integration. Unknown/unmapped
+ * type codes fall through to ZONE_TYPE_NOGO, so areas still surface even for a type
+ * this table doesn't know about yet.
  */
 const ZONE_TYPE_NOGO = 1;
 const ZONE_TYPE_WALL = 2;
 const ZONE_TYPE_NOMOP = 6;
+
+/**
+ * doc/PROTOCOL.md "Room management": robot-side language code for the `lang` field
+ * in split_room/arrange_room, from the app's own LanguageHelper.java enum
+ * (LANGUAGE_TYPE_ENGLISH = 2; LANGUAGE_TYPE_CHINESE = 1; no defined 0 value at all).
+ * Used as the fallback when ephemeralState.language hasn't been learned yet.
+ * Live-confirmed 2026-09-22: sending 0 (an undefined value in that enum) produced a
+ * Chinese default room name ("房间3", "Room 3") after a merge — English (2) is the
+ * correct fallback, not 0.
+ */
+const LANGUAGE_TYPE_ENGLISH = 2;
 
 /**
  * RobotMap.objects (ObjectDataInfo.objectTypeId) → display label, from the app's
@@ -284,6 +294,7 @@ module.exports = {
     ZONE_TYPE_NOGO: ZONE_TYPE_NOGO,
     ZONE_TYPE_WALL: ZONE_TYPE_WALL,
     ZONE_TYPE_NOMOP: ZONE_TYPE_NOMOP,
+    LANGUAGE_TYPE_ENGLISH: LANGUAGE_TYPE_ENGLISH,
     AI_OBJECT_TYPE_LABELS: AI_OBJECT_TYPE_LABELS,
     FAULT_MESSAGES: FAULT_MESSAGES,
     STATUS_ONLY_FAULT_CODES: STATUS_ONLY_FAULT_CODES,

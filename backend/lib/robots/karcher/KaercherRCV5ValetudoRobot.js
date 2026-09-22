@@ -120,7 +120,9 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             capabilities.KaercherCurrentStatisticsCapability,
             capabilities.KaercherMapSegmentationCapability,
             capabilities.KaercherZoneCleaningCapability,
-            capabilities.KaercherCombinedVirtualRestrictionsCapability
+            capabilities.KaercherCombinedVirtualRestrictionsCapability,
+            capabilities.KaercherMapSegmentEditCapability,
+            capabilities.KaercherMapSegmentRenameCapability
         ];
 
         if (this.knownHasAutoEmptyDock === true) {
