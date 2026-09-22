@@ -86,6 +86,40 @@ describe("KaercherStateDerivation", () => {
             }
         });
 
+        it("surfaces statusMessage while relocalizing mid-GO_HOME, not just when idle (e.g. right after pickup, before re-docking)", () => {
+            const result = KaercherStateDerivation.deriveStatus({work_mode: 5, status: 0, charge_state: 0, fault: 2108});
+
+            assert.strictEqual(result.value, "returning");
+            assert.strictEqual(result.faultCode, undefined);
+            assert.strictEqual(result.statusMessage, "Relocalizing");
+        });
+
+        it("surfaces statusMessage while cleaning (e.g. a scheduled/repeat clean in progress)", () => {
+            const result = KaercherStateDerivation.deriveStatus({work_mode: 1, status: 0, charge_state: 0, fault: 2109});
+
+            assert.strictEqual(result.value, "cleaning");
+            assert.strictEqual(result.statusMessage, "Repeat cleaning in progress");
+        });
+
+        it("surfaces statusMessage while paused", () => {
+            const result = KaercherStateDerivation.deriveStatus({work_mode: 4, status: 0, charge_state: 0, fault: 2103});
+
+            assert.strictEqual(result.value, "paused");
+            assert.strictEqual(result.statusMessage, "Changing state");
+        });
+
+        it("never surfaces statusMessage while docked, even for a status-only code (fault is a merge-only cache with no expiry — a code from the docking transition, e.g. 2103, would otherwise stick forever through steady-state charging)", () => {
+            const viaGoHome = KaercherStateDerivation.deriveStatus({work_mode: 5, status: 4, charge_state: 1, fault: 2103});
+            const viaIdle = KaercherStateDerivation.deriveStatus({work_mode: 0, status: 4, charge_state: 1, fault: 2105});
+            const viaUnknownWorkMode = KaercherStateDerivation.deriveStatus({work_mode: 999, status: 4, charge_state: 1, fault: 2103});
+
+            [viaGoHome, viaIdle, viaUnknownWorkMode].forEach((result) => {
+                assert.strictEqual(result.value, "docked");
+                assert.strictEqual(result.faultCode, undefined);
+                assert.strictEqual(result.statusMessage, undefined);
+            });
+        });
+
         it("has no statusMessage for plain idle (fault: 0) or genuine errors", () => {
             assert.strictEqual(KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: 0}).statusMessage, undefined);
             assert.strictEqual(KaercherStateDerivation.deriveStatus({work_mode: 0, status: 0, charge_state: 0, fault: 507}).statusMessage, undefined);
