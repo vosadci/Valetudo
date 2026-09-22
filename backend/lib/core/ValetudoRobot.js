@@ -376,7 +376,9 @@ ValetudoRobot.EVENTS = {
 ValetudoRobot.DEFAULT_MAP = require("../res/default_map");
 
 ValetudoRobot.WELL_KNOWN_PROPERTIES = {
-    FIRMWARE_VERSION: "firmwareVersion"
+    FIRMWARE_VERSION: "firmwareVersion",
+    SERIAL_NUMBER: "serialNumber",
+    MAC_ADDRESS: "macAddress"
 };
 
 ValetudoRobot.MAP_POLLING_INTERVALS = Object.freeze({

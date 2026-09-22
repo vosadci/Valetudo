@@ -37,6 +37,13 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
             mop_life: undefined,
             cleaning_time: undefined,
             cleaning_area: undefined,
+            // Surfaced via getProperties() (WELL_KNOWN_PROPERTIES.FIRMWARE_VERSION).
+            // Both are in ROBOT_PROPERTIES' confirmed-from-the-real-app section
+            // (KaercherConst.js); `firmware` is preferred when both are present, see
+            // getProperties() below — live-confirmed 2026-09-22 (shows e.g. "I3.12.90",
+            // matching the version reported by the robot's own firmware update check).
+            firmware: undefined,
+            firmware_code: undefined,
             // Needed by KaercherMapSegmentationCapability's set_preference calls
             // (doc/PROTOCOL.md §14) — the preference table is keyed per map_id.
             current_map_id: undefined,
@@ -290,7 +297,7 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
                 statusRelevant = true;
             }
         }
-        for (const key of ["main_brush", "side_brush", "hypa", "mop_life", "current_map_id", "cleaning_time", "cleaning_area", "volume"]) {
+        for (const key of ["main_brush", "side_brush", "hypa", "mop_life", "current_map_id", "cleaning_time", "cleaning_area", "volume", "firmware", "firmware_code"]) {
             if (data[key] !== undefined) {
                 this.ephemeralState[key] = data[key];
             }
@@ -482,6 +489,39 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
 
     getModelName() {
         return "RCV 5";
+    }
+
+    /**
+     * sn/mac: prefer the live in-memory dummycloud values (kept current across an
+     * onIdentityLearned re-login) over the on-disk copy, falling back to disk only
+     * before the dummycloud has learned them this session — same fallback
+     * readKnownIdentity() itself exists for (see its own header comment).
+     *
+     * firmware: `firmware` preferred over `firmware_code` when both are present —
+     * live-confirmed 2026-09-22 to yield a human-readable version string (e.g.
+     * "I3.12.90"), see the ephemeralState field comment above.
+     *
+     * @return {object}
+     */
+    getProperties() {
+        const superProps = super.getProperties();
+        const ourProps = {};
+        const identity = this.dummycloud?.sn !== undefined ? this.dummycloud : this.readKnownIdentity();
+
+        if (identity?.sn !== undefined) {
+            ourProps[KaercherRCV5ValetudoRobot.WELL_KNOWN_PROPERTIES.SERIAL_NUMBER] = identity.sn;
+        }
+        if (identity?.mac !== undefined) {
+            ourProps[KaercherRCV5ValetudoRobot.WELL_KNOWN_PROPERTIES.MAC_ADDRESS] = identity.mac;
+        }
+
+        const firmwareVersion = this.ephemeralState.firmware ?? this.ephemeralState.firmware_code;
+
+        if (firmwareVersion !== undefined) {
+            ourProps[KaercherRCV5ValetudoRobot.WELL_KNOWN_PROPERTIES.FIRMWARE_VERSION] = firmwareVersion;
+        }
+
+        return Object.assign({}, superProps, ourProps);
     }
 
     static IMPLEMENTATION_AUTO_DETECTION_HANDLER() {

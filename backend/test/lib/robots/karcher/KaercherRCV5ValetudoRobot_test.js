@@ -307,4 +307,68 @@ describe("KaercherRCV5ValetudoRobot", () => {
             assert.deepStrictEqual(robot.readKnownIdentity(), {sn: "SG12345678", mac: "AA:BB:CC:DD:EE:FF"});
         });
     });
+
+    describe("getProperties", () => {
+        const scratchPath = path.join(os.tmpdir(), `karcher-properties-test-${process.pid}.json`);
+        const originalPath = KaercherRCV5ValetudoRobot.IDENTITY_PATH;
+
+        afterEach(() => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = originalPath;
+            try {
+                fs.unlinkSync(scratchPath);
+            } catch (e) {
+                // Nothing to clean up if a test never wrote it.
+            }
+        });
+
+        it("is empty when nothing is known yet (no persisted identity, no firmware push)", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            assert.deepStrictEqual(robot.getProperties(), {});
+        });
+
+        it("surfaces sn/mac from the persisted identity file when no dummycloud is running", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            robot.persistIdentity("SG12345678", "AA:BB:CC:DD:EE:FF");
+
+            assert.deepStrictEqual(robot.getProperties(), {
+                serialNumber: "SG12345678",
+                macAddress: "AA:BB:CC:DD:EE:FF"
+            });
+        });
+
+        it("prefers the live dummycloud sn/mac over the on-disk copy once known", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            robot.persistIdentity("SG-STALE-DISK", "AA:BB:CC:DD:EE:FF");
+            robot.dummycloud = {sn: "SG-LIVE", mac: "11:22:33:44:55:66"};
+
+            assert.deepStrictEqual(robot.getProperties(), {
+                serialNumber: "SG-LIVE",
+                macAddress: "11:22:33:44:55:66"
+            });
+        });
+
+        it("surfaces firmware from a prop push, preferring `firmware` over `firmware_code` when both are present", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            robot.parseAndUpdateState({firmware: "1.2.3", firmware_code: "99"});
+
+            assert.strictEqual(robot.getProperties().firmwareVersion, "1.2.3");
+        });
+
+        it("falls back to firmware_code when firmware itself is absent", () => {
+            KaercherRCV5ValetudoRobot.IDENTITY_PATH = scratchPath;
+            const robot = buildRobot();
+
+            robot.parseAndUpdateState({firmware_code: "99"});
+
+            assert.strictEqual(robot.getProperties().firmwareVersion, "99");
+        });
+    });
 });

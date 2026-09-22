@@ -607,7 +607,9 @@ export interface SetQuirkValueCommand {
 }
 
 export interface RobotProperties {
-    firmwareVersion: string
+    firmwareVersion?: string,
+    serialNumber?: string,
+    macAddress?: string
 }
 
 export interface ValetudoCustomizations {
