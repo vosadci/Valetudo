@@ -239,7 +239,8 @@ class KaercherMapParser {
                 for (let i = 0; i < distinctPoints.length - 1; i++) {
                     entities.push(new mapEntities.LineMapEntity({
                         points: [distinctPoints[i].x, distinctPoints[i].y, distinctPoints[i + 1].x, distinctPoints[i + 1].y],
-                        type: mapEntities.LineMapEntity.TYPE.VIRTUAL_WALL
+                        type: mapEntities.LineMapEntity.TYPE.VIRTUAL_WALL,
+                        metaData: {id: String(zone.areaIndex)}
                     }));
                 }
                 return;
