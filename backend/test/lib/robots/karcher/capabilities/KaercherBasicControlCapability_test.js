@@ -82,4 +82,16 @@ describe("KaercherBasicControlCapability", () => {
             assert.strictEqual(sent[0].name, "set_room_clean");
         });
     });
+
+    describe("while a room clean is paused (work_mode 4/9/27/37/82)", () => {
+        for (const workMode of [4, 9, 27, 37, 82]) {
+            it(`start() resumes with an empty room_ids, not a fresh full-house list (work_mode ${workMode})`, async () => {
+                const {robot, sent} = buildRobot(workMode);
+                await new KaercherBasicControlCapability({robot: robot}).start();
+
+                assert.strictEqual(sent[0].name, "set_room_clean");
+                assert.deepStrictEqual(sent[0].params, {room_ids: [], ctrl_value: 1, clean_type: 0});
+            });
+        }
+    });
 });

@@ -176,6 +176,21 @@ describe("KaercherRCV5ValetudoRobot", () => {
         });
     });
 
+    describe("isPaused", () => {
+        it("is true for the generic PAUSE work_mode family (4/9/27/31/37/82)", () => {
+            const robot = buildRobot();
+
+            for (const workMode of [4, 9, 27, 31, 37, 82]) {
+                robot.ephemeralState.work_mode = workMode;
+                assert.strictEqual(robot.isPaused(), true, `work_mode ${workMode}`);
+            }
+            for (const workMode of [undefined, 0, 1, 30, 32, 35]) {
+                robot.ephemeralState.work_mode = workMode;
+                assert.strictEqual(robot.isPaused(), false, `work_mode ${workMode}`);
+            }
+        });
+    });
+
     describe("readCurrentRawValue", () => {
         it("returns the fallback when the attribute has never been learned", () => {
             const robot = buildRobot();

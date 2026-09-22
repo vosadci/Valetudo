@@ -15,6 +15,13 @@ const BasicControlCapability = require("../../../core/capabilities/BasicControlC
  * instead. A fresh `start()` from idle always begins a room clean — zone cleans can
  * only be started via KaercherZoneCleaningCapability itself.
  *
+ * Resuming a *paused room* clean is a third case, checked next via
+ * `robot.isPaused()`: it reuses the same `set_room_clean`/`ctrl_value: 1` opcode as
+ * a fresh start, but must send `room_ids: []` rather than the full segment list —
+ * sending the fresh-start shape while paused made the robot self-check/relocalize
+ * and begin an entirely new full-house clean instead of continuing, device-confirmed
+ * live 2026-09-22 (see KaercherRCV5ValetudoRobot.isPaused()'s own header comment).
+ *
  * ⚠ set_zone_clean itself is APK-derived, not yet device-capture-verified — see
  * KaercherZoneCleaningCapability's own header comment.
  *
@@ -27,6 +34,15 @@ class KaercherBasicControlCapability extends BasicControlCapability {
     async start() {
         if (this.robot.isZoneCleanActive()) {
             await this.robot.sendServiceInvoke("set_zone_clean", {ctrl_value: 1});
+            return;
+        }
+
+        if (this.robot.isPaused()) {
+            await this.robot.sendServiceInvoke("set_room_clean", {
+                room_ids: [],
+                ctrl_value: 1,
+                clean_type: 0
+            });
             return;
         }
 

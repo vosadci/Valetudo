@@ -408,6 +408,23 @@ class KaercherRCV5ValetudoRobot extends ValetudoRobot {
     }
 
     /**
+     * doc/PROTOCOL.md §5: resuming a paused room clean must send `room_ids: []`
+     * (not the full room list) alongside `ctrl_value: 1` — the same "start" opcode
+     * used for a fresh clean, but the firmware only treats it as "continue" while
+     * work_mode is still PAUSE; a fresh-start-shaped payload (explicit room ids)
+     * makes it self-check/relocalize and begin a brand-new full-house clean
+     * instead, device-confirmed live 2026-09-22. Zone-clean pausing (work_mode 31)
+     * is excluded here since KaercherBasicControlCapability already routes that
+     * case through isZoneCleanActive() first, which never needs an explicit room
+     * list to begin with.
+     *
+     * @return {boolean}
+     */
+    isPaused() {
+        return KaercherConst.WORK_MODE_SETS.PAUSE.includes(this.ephemeralState.work_mode);
+    }
+
+    /**
      * Reads back the raw device value behind a currently-known preset attribute
      * (stashed as metaData.rawValue whenever wind/water/mode pushes are parsed) —
      * used by KaercherMapSegmentationCapability to carry the robot's current global
