@@ -47,6 +47,7 @@ import {
     useMopTwistControlMutation,
     useMopTwistControlQuery,
     useObstacleAvoidanceControlMutation,
+    useObstacleAvoidanceControlPropertiesQuery,
     useObstacleAvoidanceControlQuery,
     useObstacleImagesMutation,
     useObstacleImagesQuery,
@@ -339,6 +340,10 @@ const AutoEmptyDockAutoEmptyIntervalControlCapabilitySelectListMenuItem = () => 
 
 const ObstacleAvoidanceControlCapabilitySwitchListMenuItem = () => {
     const {
+        data: obstacleAvoidanceControlProperties,
+    } = useObstacleAvoidanceControlPropertiesQuery();
+
+    const {
         data: data,
         isFetching: isFetching,
         isError: isError,
@@ -347,6 +352,17 @@ const ObstacleAvoidanceControlCapabilitySwitchListMenuItem = () => {
     const {mutate: mutate, isPending: isChanging} = useObstacleAvoidanceControlMutation();
     const loading = isFetching || isChanging;
     const disabled = loading || isChanging || isError;
+
+    const description = React.useMemo(() => {
+        let desc = "Avoid obstacles using sensors such as lasers or cameras. May suffer from false positives.";
+        const detectableTypes = obstacleAvoidanceControlProperties?.detectableTypes;
+
+        if (detectableTypes && detectableTypes.length > 0) {
+            desc += ` Detected types: ${detectableTypes.join(", ")}.`;
+        }
+
+        return desc;
+    }, [obstacleAvoidanceControlProperties]);
 
     return (
         <ToggleSwitchListMenuItem
@@ -357,7 +373,7 @@ const ObstacleAvoidanceControlCapabilitySwitchListMenuItem = () => {
             disabled={disabled}
             loadError={isError}
             primaryLabel={"Obstacle Avoidance"}
-            secondaryLabel={"Avoid obstacles using sensors such as lasers or cameras. May suffer from false positives."}
+            secondaryLabel={description}
             icon={<ObstacleAvoidanceControlIcon/>}
         />
     );

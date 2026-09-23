@@ -16,5 +16,16 @@ build/
 /backend/lib/res/valetudo.openapi.schema.json
 /backend/lib/res/build_metadata.json
 /backend/lib/robots/midea/generated/midea_protobufs.js
+/backend/lib/robots/karcher/generated/karcher_protobufs.js
 
 /docs/dist
+
+# Kärcher RCV5 contrib tooling: scripts are tracked, generated/captured
+# artifacts and off-device backups are not.
+/contrib/karcher-rcv5/server.key
+/contrib/karcher-rcv5/server.crt
+/contrib/karcher-rcv5/server_v1.crt
+/contrib/karcher-rcv5/server_v1.der
+/contrib/karcher-rcv5/map_captures/
+/contrib/karcher-rcv5/__pycache__/
+/contrib/device-originals-backup/

@@ -53,6 +53,7 @@ const RobotStatus = (): React.ReactElement => {
             <Typography variant="overline">
                 {status.value}
                 {status.flag !== "none" ? <> &ndash; {status.flag}</> : ""}
+                {status.message ? <> &ndash; {status.message}</> : ""}
             </Typography>
         );
     }, [isStatusError, status]);

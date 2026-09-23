@@ -1,0 +1,8 @@
+{
+  "sn": "SG12345678",
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "productId": "1540149850806333440",
+  "blob_b64": "Jr6X0H5DVSgsUszKXZmCuMkFMcCICZfC4XyldA3PCMb0v97nAjjqjY/6otgqM4fNWjuW0s/oYKcNrBPmchhEPgE4piIssn+wjJuHFAVmxpd8CoVIWg3Oa9e2+oObWW+x9NHWb+TIqsgyWQ3vJ1CovAmE4qAFhr8B2wSBKlDH0bHuXvQCm1yCVP0HHYKRr8B25tiyafwkBL0m3foDvJZJqw==",
+  "expected_key_hex": "35363837376331366564666437323831",
+  "expected_plaintext_b64": "dGhpcyBzdGFuZHMgaW4gZm9yIGEgcmVhbCBSb2JvdE1hcCBwcm90b2J1ZiBwYXlsb2FkLCBjb21wcmVzc2libGUgemxpYiBkYXRhdGhpcyBzdGFuZHMgaW4gZm9yIGEgcmVhbCBSb2JvdE1hcCBwcm90b2J1ZiBwYXlsb2FkLCBjb21wcmVzc2libGUgemxpYiBkYXRhdGhpcyBzdGFuZHMgaW4gZm9yIGEgcmVhbCBSb2JvdE1hcCBwcm90b2J1ZiBwYXlsb2FkLCBjb21wcmVzc2libGUgemxpYiBkYXRh"
+}

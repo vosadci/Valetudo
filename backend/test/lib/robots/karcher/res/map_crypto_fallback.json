@@ -1,0 +1,8 @@
+{
+  "sn": "SG12345678",
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "productId": "1540149850806333440",
+  "blob_b64": "C0nxZeEQ53LMuJRO9R8ly0D10jaEE2rfCVsNRiEFonMU4+weyce51TfZt2OjzsJLjEcM1MTku6nOHAiv3Ej1xv/Oz8NmqiPhEGPPjGj2Mu72xaYvienMfjQdPIDIhhwZ+es/42i5Vud4i3Jia25MH/Lv+oid9sOVz6uKzhdvR9w=",
+  "expected_key_hex": "35363837376331366564666437323831",
+  "expected_plaintext_b64": "bm90IHpsaWIgZGF0YSwganVzdCByYXcgYnl0ZXMgdG8gZXhlcmNpc2UgdGhlIGZhbGxiYWNrIGJyYW5jaA=="
+}

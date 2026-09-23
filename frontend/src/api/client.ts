@@ -47,6 +47,7 @@ import {
     NetworkAdvertisementProperties,
     NTPClientConfiguration,
     NTPClientStatus,
+    ObstacleAvoidanceControlCapabilityProperties,
     ObstacleImagesProperties,
     DuststreamingProperties,
     DuststreamingConfiguration,
@@ -835,6 +836,16 @@ export const fetchObstacleAvoidanceControlState = async (): Promise<SimpleToggle
 
 export const sendObstacleAvoidanceControlState = async (enable: boolean): Promise<void> => {
     await sendToggleMutation(Capability.ObstacleAvoidanceControl, enable);
+};
+
+export const fetchObstacleAvoidanceControlProperties = async (): Promise<ObstacleAvoidanceControlCapabilityProperties> => {
+    return valetudoAPI
+        .get<ObstacleAvoidanceControlCapabilityProperties>(
+            `/robot/capabilities/${Capability.ObstacleAvoidanceControl}/properties`
+        )
+        .then(({data}) => {
+            return data;
+        });
 };
 
 export const fetchPetObstacleAvoidanceControlState = async (): Promise<SimpleToggleState> => {

@@ -311,6 +311,14 @@ const SystemInformation = (): React.ReactElement => {
             {
                 header: "Firmware Version",
                 body: robotProperties?.firmwareVersion
+            },
+            {
+                header: "Serial Number",
+                body: robotProperties?.serialNumber
+            },
+            {
+                header: "MAC Address",
+                body: robotProperties?.macAddress
             }
         ].filter(item => {
             return item.body !== undefined;
