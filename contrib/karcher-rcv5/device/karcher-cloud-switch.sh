@@ -286,12 +286,106 @@ mode_valetudo() {
     persist_mode "valetudo"
 }
 
+# --- Read-only status reporting (mirrors aiot-gate.sh's mode_status in
+# style). Never writes anything — not even oem_writable()'s throwaway probe
+# file, so this uses mountpoint -q instead. /oem has no third state (see
+# the comment in mode_cloud() above): it's either the stock read-only
+# rootfs or the aiot-gate.sh overlay bind-mount, so mountpoint alone is
+# sufficient here, and it's a directory bind mount — the kind switch_hosts()
+# already documents mountpoint as reliable for (only *file* bind mounts
+# like /etc/hosts are the unreliable case).
+
+cmp_file() {  # $1=target $2=source -> same|differs|target-absent|source-absent
+    [ -f "$1" ] || { echo "target-absent"; return; }
+    [ -f "$2" ] || { echo "source-absent"; return; }
+    if cmp -s "$1" "$2"; then echo same; else echo differs; fi
+}
+
+backup_sanity() {  # $1=path $2=kind(hosts|cert) -> present/absent + a basic well-formedness check.
+    # ensure_backups() only ever checks [ -f ... ] before deciding NOT to
+    # recreate a backup — it never re-verifies an EXISTING one, so a
+    # truncated/corrupted-but-present file would silently look fine there
+    # forever. This doesn't fix that (recreating one automatically here
+    # would risk backing up already-redirected state instead of genuine
+    # stock content — see ensure_backups()'s own comment), just reports it.
+    [ -f "$1" ] || { echo "absent"; return; }
+    [ -s "$1" ] || { echo "present but EMPTY (0 bytes)"; return; }
+    if [ "$2" = cert ]; then
+        if grep -q -F -e "BEGIN CERTIFICATE" "$1" 2>/dev/null; then
+            echo "present, looks like a valid cert"
+        else
+            echo "present but does NOT look like a valid cert (no BEGIN CERTIFICATE marker)"
+        fi
+    else
+        echo "present, non-empty"
+    fi
+}
+
+which_source() {  # $1=target, then "label path" pairs -> first matching label, else (absent)/unknown
+    target="$1"
+    shift
+    [ -f "$target" ] || { echo "(absent)"; return; }
+    while [ $# -ge 2 ]; do
+        label="$1"
+        path="$2"
+        shift 2
+        if [ -f "$path" ] && cmp -s "$target" "$path"; then
+            echo "$label"
+            return
+        fi
+    done
+    echo "unknown (matches neither known source)"
+}
+
+mode_status() {
+    echo "mode file                 : $(cat "$MODE_FILE" 2>/dev/null || echo '(absent -> cloud)')"
+    echo "backup: $HOSTS_BACKUP  : $(backup_sanity "$HOSTS_BACKUP" hosts)"
+    echo "backup: $CERT_BACKUP   : $(backup_sanity "$CERT_BACKUP" cert)"
+    echo "backup: $GDROOT_BACKUP : $(backup_sanity "$GDROOT_BACKUP" cert)"
+
+    echo "/etc/hosts source         : $(which_source /etc/hosts stock "$HOSTS_BACKUP" valetudo "$HOSTS_VALETUDO")"
+    # switch_hosts()'s own comment documents mountpoint giving false
+    # negatives for this FILE bind mount, and three stacked layers going
+    # undetected live once — count them directly instead of trusting it.
+    # `|| true` (not `|| echo 0`): grep -c already prints "0" itself on a
+    # zero-match search of an existing file, but also exits 1 for that —
+    # `|| echo 0` used to add a SECOND "0" line on top of grep's own,
+    # under set -e's command-substitution rules. `|| true` neutralizes the
+    # exit code without adding output; ${hosts_layers:-0} covers the
+    # genuinely-file-absent case (grep prints nothing then).
+    hosts_layers=$(grep -c ' /etc/hosts ' /proc/mounts 2>/dev/null || true)
+    hosts_layers="${hosts_layers:-0}"
+    extra=""
+    if [ "$hosts_layers" -gt 1 ] 2>/dev/null; then
+        extra=" (STACKED - see switch_hosts() comment)"
+    fi
+    echo "/etc/hosts bind layers    : ${hosts_layers}${extra}"
+
+    echo "$CERT_TARGET_OEM      : $(which_source "$CERT_TARGET_OEM" stock "$CERT_BACKUP" valetudo "$CERT_VALETUDO")"
+    echo "$CERT_TARGET_USERDATA : $(which_source "$CERT_TARGET_USERDATA" stock "$CERT_BACKUP" valetudo "$CERT_VALETUDO")"
+    echo "  oem/userdata agree      : $(cmp_file "$CERT_TARGET_OEM" "$CERT_TARGET_USERDATA")"
+
+    if [ ! -f "$GDROOT_TARGET" ]; then
+        gdroot_state="(absent)"
+    elif [ -f "$GDROOT_BACKUP" ] && cmp -s "$GDROOT_BACKUP" "$GDROOT_TARGET"; then
+        gdroot_state="stock"
+    elif [ -f "$GDROOT_BACKUP" ] && [ -f "$CERT_VALETUDO" ] && cat "$GDROOT_BACKUP" "$CERT_VALETUDO" 2>/dev/null | cmp -s - "$GDROOT_TARGET"; then
+        gdroot_state="stock+valetudo-dev-cert"
+    else
+        gdroot_state="unknown (matches neither known composition)"
+    fi
+    echo "gdroot bundle             : $gdroot_state"
+
+    echo "/oem source               : $(mountpoint -q /oem 2>/dev/null && echo 'overlay (writable)' || echo 'stock rootfs (read-only)')"
+}
+
 case "${1:-}" in
     cloud) mode_cloud ;;
     valetudo) mode_valetudo ;;
     backup) mode_backup ;;
+    status) mode_status ;;
     *)
-        echo "usage: $0 {cloud|valetudo|backup}" >&2
+        echo "usage: $0 {cloud|valetudo|backup|status}" >&2
         exit 1
         ;;
 esac

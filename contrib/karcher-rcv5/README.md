@@ -125,7 +125,9 @@ both versions. This tooling — `aiot-gate.sh`'s `wifi-deamon.sh` patch above
 all — is anchored to that specific firmware and will refuse or silently
 misbehave on another build; a factory reset or a vendor update can revert or
 change it without warning, so this is checked on every run, not just the
-first.
+first. If it mismatches, run `./upgrade-firmware.sh <robot-ip>` — it
+downloads, verifies, and stages the correct image on the robot, but does not
+flash it automatically (see "Updating firmware" below).
 
 You'll be asked for the root password once (subsequent `ssh`/`scp` calls in
 the same run, and any other script run within 10 minutes, reuse that
@@ -202,7 +204,59 @@ From `contrib/karcher-rcv5/`:
 Either way, the three irreplaceable backup files under `/userdata/` (see
 "Irreplaceable files" below) are never touched.
 
+## Checking the robot's state
+
+Entirely read-only — safe to run against a robot in any state, including
+one that's never been provisioned or was just reset. Prints every file/
+mount/process this toolkit touches and its current state; nothing is
+written, moved, or removed. Useful before a reset, after one, or any time
+the robot's state is unclear. From `contrib/karcher-rcv5/`:
+
+```sh
+./diagnose.sh <robot-ip>
+```
+
+Covers: firmware version (and whether `/oem`'s overlay could be masking a
+stale reading); disk space; every pushed file compared by md5 against your
+**local checkout**, not the copy on-device — a stale or missing on-device
+copy is itself one of the things this reports; the boot trampoline's two
+copies; runtime state files, including `device-identity.json`'s actual
+content, and JSON-validity of both it and `config.json`; the
+three irreplaceable backups compared against `device-originals-backup/`;
+`karcher-cloud-switch.sh`'s and `aiot-gate.sh`'s own status reporting
+(relayed from your local checkout, not the on-device copy, for the same
+staleness reason); Valetudo's process state; any staged firmware upgrade
+image; and the vendor's own `/userdata/debug_mode` SSH/ADB gate flag. Ends
+with a count of items that need attention (the exit code reflects it too).
+
+### If you only have the robot, not this checkout
+
+`install.sh` also pushes `/userdata/valetudo/manage.sh` — a self-contained
+on-device entry point for exactly the situation where you have SSH access
+to the robot but not this repo or README. Run it with no arguments (or
+`ssh root@<robot-ip> /userdata/valetudo/manage.sh`) and it prints the
+current state plus what you can do next:
+
+```sh
+manage.sh                    # status + contextual menu (also: help)
+manage.sh activate           # arm the overlay, patch the gate, switch to valetudo mode
+manage.sh deactivate         # switch back to the real Kärcher cloud
+manage.sh uninstall [--purge]
+```
+
+It's a thin wrapper around `karcher-cloud-switch.sh`/`aiot-gate.sh`/
+`S96valetudo` — the same calls `activate.sh`/`uninstall.sh` make from the
+Mac, just run locally. The one thing it can't do that `activate.sh` can:
+survive its own host rebooting mid-sequence. First-time activation needs
+the `/oem` overlay armed, which needs a reboot before it can be patched —
+`manage.sh activate` stages that and tells you to reboot and re-run it,
+rather than rebooting the robot out from under your own SSH session
+unannounced.
+
 ## Disaster recovery
+
+Unsure what state the robot is actually in? Run `./diagnose.sh <robot-ip>`
+first.
 
 If a factory reset (or anything else) wipes `/userdata`, restore the
 Mac-side backups first, then re-provision. From `contrib/karcher-rcv5/`:
@@ -213,7 +267,106 @@ Mac-side backups first, then re-provision. From `contrib/karcher-rcv5/`:
 ./activate.sh <robot-ip>
 ```
 
+## Updating firmware
+
+If `install.sh` or `upgrade-firmware.sh` report a firmware mismatch (see
+"Installing on the robot" above), `upgrade-firmware.sh` downloads, verifies,
+and stages the correct image on the robot — it does **not** flash it. From
+`contrib/karcher-rcv5/`:
+
+```sh
+./upgrade-firmware.sh <robot-ip>
+```
+
+**What it does**: reads the robot's current `sysVersion`/`sysVersionCode`;
+if it already matches this tooling's target (`I3.12.90`), warns and exits —
+nothing to do. If the robot reports a *newer* build than the target, it
+refuses outright: staging an older image would be a downgrade, and this
+tooling hasn't been re-verified against whatever newer firmware that is.
+Otherwise it checks free space on `/userdata`, downloads the official image
+from Kärcher's CDN (cached at `~/Downloads/Karcher app-FW/` after the first
+run, matching the convention already used for firmware research in the
+sibling `karcher-rcv5-ha` repo — outside any repo, never committed), verifies
+its md5, and pushes the verified copy to a neutral path on the robot
+(`/userdata/valetudo-firmware-upgrade/`) — deliberately *not* the path the
+vendor's own updater is suspected to watch, so staging it can never
+accidentally trigger anything.
+
+**Stale-version caveat.** Both firmware checks read `/oem/sysconf/
+sysVersion.ini`. Once `activate.sh` has ever armed the `aiot-gate.sh` `/oem`
+overlay on a robot, `/oem` becomes a bind-mount from a copy at
+`/userdata/debug_dir/oem` — and `overlay_on()` re-arms an *existing* copy
+without refreshing it. So if a firmware update happens (by any method) while
+that overlay is active, the version these checks report can be a stale
+snapshot, not what's really flashed. Both `install.sh` and
+`upgrade-firmware.sh` warn when this is the case; when in doubt:
+```sh
+ssh root@<robot-ip> /userdata/valetudo/aiot-gate.sh overlay off
+```
+then reboot and re-check.
+
+**Space math.** The image is ~100MB. On a 198MB `/userdata` partition, that
+competes with whatever else is already there: a Valetudo install is ~32MB
+(`uninstall.sh <robot-ip> --purge` reclaims it), and the `aiot-gate.sh`
+overlay copy — if ever armed — is ~109MB on its own (`aiot-gate.sh overlay
+off` reclaims it, but that also undoes the boot-time cloud-window patch and
+the cert swap; not a casual toggle, only worth it if valetudo mode isn't
+needed right now). `upgrade-firmware.sh` checks both and tells you which
+would actually free enough.
+
+**Once staged**, the script's own final output gives two options:
+
+- **(a) Safe, confirmed**: remove the staged file and switch the robot back
+  to cloud mode (`karcher-cloud-switch.sh cloud` — the real app can't reach
+  a dummycloud-redirected robot), then re-pair through the official Kärcher
+  app, which offers a firmware update as part of that flow. See "Recovering
+  from a WiFi/config reset" below — this is the only path that's been
+  confirmed end-to-end.
+- **(b) Unverified, experimental** — see the next section.
+
+### Unverified local OTA trigger
+
+Research only, from `strings`/symbol analysis of `/oem/bin/upgrade` (the
+robot's own OTA daemon — a persistent process, not a one-shot CLI, started
+unconditionally at boot by `/etc/init.d/S95robotUpgrade`) and `/oem/bin/
+RobotApp`, done against the extracted `I3.12.90` rootfs. **Never
+instruction-traced or tested on real hardware** — treat this as a lead to
+investigate, not a procedure to run.
+
+Both binaries share a local file-based handoff, independent of MQTT/cloud
+once an image is already on the robot:
+
+- `/userdata/Download` — plausible staging directory the daemon watches
+  (literal string in both binaries); the image is expected there as
+  `update.img` (`upgrade` has the format string `"Md5Check update.img
+  fwSize:%ld"`).
+- `/userdata/NewOta` — a version-marker file. `RobotApp` exports a real,
+  demangled C++ symbol `everest::base::CFilePath::touchNewOtaFile(int)` that
+  writes it, and `::getNewOtaVersion()` that reads it back — exact byte
+  format unconfirmed (plausibly just the numeric version code, e.g. `90`,
+  inferred from the `(int)` argument alone).
+- `/tmp/ota_start` — the actual go-signal file. Both binaries share this
+  literal string; `RobotApp` also has a matching `"ota_start = "` format
+  string.
+- `upgrade` also does a real space-check on its download directory before
+  proceeding (`UdpServer::sendNeedSpace`/`sendNoNeedSpace`,
+  `CFileSystem::detectOccupacySpace`, `CFilePath::m_download_dir`) — the
+  space math above isn't hypothetical, it's what the vendor's own code
+  checks too.
+
+If this reading holds, the trigger would be: move the staged image to
+`/userdata/Download/update.img`, write the version code to `/userdata/
+NewOta`, then touch `/tmp/ota_start` — entirely local, no MQTT/cloud
+involved. Re-flashing the genuine, officially-signed image isn't blocked by
+verified boot either way (that only guards *modified* images). What's
+genuinely unknown: the exact file formats above, and whether this reading
+of the strings/symbols is even complete. Back the robot up first (see
+"Disaster recovery" above) before attempting this.
+
 ## Recovering from a WiFi/config reset
+
+Unsure what state the robot is actually in? Run `./diagnose.sh <robot-ip>`
+first.
 
 Three different ways to trigger a reset on this robot were all live-tested 2026-09-21
 and land on the same **shallow** wipe — shallower than a full `/userdata` factory
@@ -233,7 +386,29 @@ intact.
 
 To get WiFi back without going through the app's SoftAP re-pairing flow:
 `wpa_supplicant` is already running (`S66_wifi` starts it at boot regardless of whether
-any network is configured), so reconfigure it live over its control socket:
+any network is configured), so reconfigure it live over its control socket. From
+`contrib/karcher-rcv5/`:
+
+```sh
+./configure-wifi.sh              # prompts for SSID and password (password hidden, never
+                                  # passed as an argument or left in shell history)
+```
+
+Stages the network, verifies `wpa_state=COMPLETED` (polling, not a blind sleep), and only
+*then* saves it to disk — a failed attempt never overwrites the last known-good config, so
+a typo'd password can't strand the robot on the next reboot. Reports the assigned IP when
+done. Uses `adb`, not `ssh` — unlike every other script here, since the whole reason this
+one exists is that the reset just killed network connectivity.
+
+**Caveat**: a separate vendor process, `wifiManager` (started later in boot than the
+`S66_wifi`/`wpa_supplicant` service above), also has code paths that rewrite this same
+config file (`remove_network all`, `killall wpa_supplicant`, rebuilding it from a `_tmp`
+copy) — under conditions this project hasn't fully mapped. If the connection doesn't
+survive a *subsequent* reboot (e.g. the one `activate.sh`'s first run triggers), re-check
+with `adb shell wpa_cli -i wlan0 status` before assuming something else is wrong.
+
+What it does under the hood, and how to do it by hand if you don't have this checkout —
+same `wpa_cli` sequence, run directly over `adb shell`:
 
 ```sh
 adb shell
@@ -276,12 +451,19 @@ This is exactly the class of problem `install.sh`'s firmware check (see "Install
 on the robot" above) now catches immediately and by name, instead of surfacing later
 as an unexplained silent command failure — re-run `install.sh` after re-pairing to
 confirm the firmware is back to `I3.12.90` before assuming everything else is fine.
+(See "Updating firmware" below if you'd rather not go through the app at all — though
+re-pairing remains the only end-to-end-confirmed path.)
 
 ## Troubleshooting
 
+- **Something looks wrong and you're not sure what**: run `./diagnose.sh
+  <robot-ip>` first — see "Checking the robot's state" above.
 - **`install.sh` can't reach the robot**: confirm its current IP
   (`arp -a` on the Mac, or check your router) — it's DHCP-assigned and can
   change.
+- **`install.sh` fails on a firmware mismatch**: run `./upgrade-firmware.sh
+  <robot-ip>` to download, verify, and stage the correct image — see
+  "Updating firmware" above.
 - **Activated, but no map/controls in the web UI**: give it a few seconds —
   `activate.sh` has a built-in `sleep 2` before the switch, and the switch
   script itself waits up to 20s for `RobotApp` to respawn. If it's still
@@ -338,11 +520,21 @@ script).
   guard would start overwriting our `auto_reboot.sh` on every boot. No
   runtime self-check is built for this — moot as long as no vendor OTA is
   ever applied to a rooted unit.
+- **`RobotApp` may have its own, separate cloud contact the boot-time gate
+  doesn't cover.** The gate above (`aiot-gate.sh patch`) only holds back
+  `aiot_client`. `RobotApp`'s own binary contains hardcoded hostnames
+  `das.3irobotics.net` / `log.3irobotics.net` / `ota.3irobotics.net` —
+  note **`3irobotiCs`**, a different domain from the `3irobotiX` one our
+  `/etc/hosts` redirect and the boot-time gate both target. If `RobotApp`
+  ever resolves/contacts these independently, neither mitigation covers
+  it. Static finding only (binary strings), not confirmed reachable or
+  exercised — no fix attempted here without a live capture confirming
+  it's real traffic, not just unreferenced strings.
 
 ### Irreplaceable files
 
 `/userdata/{etc-hosts,server.crt,gdroot-g2.crt}.orig` on-device, mirrored to
-`../device-originals-backup/` on the Mac, are the only record of this
+`device-originals-backup/` on the Mac, are the only record of this
 robot's pre-Valetudo state. `/userdata` is wiped by a factory reset, so the
 Mac-side copy is the only thing that makes `restore-originals.sh` possible
 after one. No script here — including `uninstall.sh --purge` — ever deletes
