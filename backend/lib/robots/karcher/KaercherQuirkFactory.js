@@ -21,12 +21,12 @@ class KaercherQuirkFactory {
                     id: id,
                     title: "Carpet Display",
                     // `privacy.carpet_show` (doc/APP_FEATURES.md "AI Recognition & Carpet
-                    // Settings", APK-verified CarpetSettingVM.setCarpetShow). Whether this
-                    // only affects the Kärcher app's own map rendering or also changes what
-                    // the robot marks in the map data Valetudo receives is unverified —
-                    // Valetudo's own carpet rendering (KaercherMapParser.DECODE_CELL) reads
-                    // grid bytes unconditionally today either way.
-                    description: "Whether the Kärcher app's own map view highlights detected carpet areas. Unverified whether this changes what Valetudo itself receives and renders.",
+                    // Settings", APK-verified CarpetSettingVM.setCarpetShow). Live-confirmed
+                    // (2026-09-24): this is a robot-side setting, not a Kärcher-app-side one —
+                    // it controls whether the robot marks carpet cells in the map data it
+                    // sends at all, which is what Valetudo renders. The robot has no cloud
+                    // connection in this setup, so the Kärcher app is not in the loop.
+                    description: "Whether detected carpet areas are shown on the map.",
                     options: ["on", "off"],
                     getter: async () => {
                         return this.robot.ephemeralState.privacy?.carpet_show === 1 ? "on" : "off";
