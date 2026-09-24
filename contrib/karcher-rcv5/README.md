@@ -1,8 +1,8 @@
 # Kärcher RCV5 Valetudo provisioning
 
-Repeatable, idempotent tooling to build a custom Valetudo vendor module for
-the Kärcher RCV5 and set it up (or fully revert it) on a freshly-rooted
-robot. The scripts here are tracked in git; the files they generate
+Tooling to build a custom Valetudo vendor module for the Kärcher RCV5 
+and set it up (or fully revert it) on a freshly-rooted robot. 
+The scripts here are tracked in git; the files they generate
 (dev TLS cert/key, the off-device backup mirror, captured test maps) are
 gitignored — see `.gitignore` for the exact list.
 
@@ -27,15 +27,14 @@ starting here.
 ## Getting the code
 
 Clone the fork — **not** upstream `Hypfer/Valetudo`, which has no Kärcher
-module — and check out the branch with the RCV5 vendor module:
+module:
 
 ```sh
 git clone git@github.com:vosadci/Valetudo.git
 cd Valetudo
-git checkout feature/karcher-rcv5-vendor-module
 ```
 
-Every command below runs on your Mac/PC — never on the robot. Each section
+Every command below runs on your Mac/PC — not on the robot. Each section
 states explicitly which directory it runs from: the repo root for `npm`/build
 commands, `contrib/karcher-rcv5/` (inside that checkout) for everything else.
 
@@ -66,14 +65,13 @@ From `contrib/karcher-rcv5/`:
 python3 gen_cert.py
 ```
 
-Safe to run from anywhere (it resolves paths off its own location, not the
-current directory) and safe to re-run: it's a no-op if `server.key`,
-`server.crt`, `server_v1.crt`, and `server_v1.der` already exist, and only
-ever writes all four together (via temp files + atomic rename), so an
-interrupted run can never leave a mismatched key/cert pair behind. Pass
-`--force` to regenerate deliberately. `install.sh` (below) pushes
-`server_v1.crt` and `server.key` to the robot; `server.crt`/`server_v1.der`
-are intermediates you can ignore afterward.
+Safe to re-run: it's a no-op if `server.key`, `server.crt`, 
+`server_v1.crt`, and `server_v1.der` already exist, and only ever writes 
+all four together (via temp files + atomic rename), so an interrupted run 
+can never leave a mismatched key/cert pair behind. Pass `--force` to 
+regenerate deliberately. `install.sh` (below) pushes `server_v1.crt` and 
+`server.key` to the robot; `server.crt`/`server_v1.der` are intermediates 
+you can ignore afterward.
 
 You do **not** need to extract anything from the Kärcher app for this step.
 The third cert the robot needs, `gdroot-g2.crt`, is *not* generated here —
@@ -120,6 +118,15 @@ yet.
 ./install.sh <robot-ip>
 ```
 
+Before touching anything else, this checks the robot's firmware
+(`/oem/sysconf/sysVersion.ini`) against the exact version this tooling was
+built against (`I3.12.90`) and refuses to proceed on a mismatch, printing
+both versions. This tooling — `aiot-gate.sh`'s `wifi-deamon.sh` patch above
+all — is anchored to that specific firmware and will refuse or silently
+misbehave on another build; a factory reset or a vendor update can revert or
+change it without warning, so this is checked on every run, not just the
+first.
+
 You'll be asked for the root password once (subsequent `ssh`/`scp` calls in
 the same run, and any other script run within 10 minutes, reuse that
 connection — see `lib.sh`). Expect output ending in:
@@ -148,6 +155,16 @@ The very first time you run this against a given robot (or any time after
 overlay it needs to write certs there and reboots the robot automatically —
 expect this run to take a minute or two longer than usual while it waits for
 the robot to come back up. Every run after that is fast, no reboot.
+
+Before switching the robot into valetudo mode, this also patches
+`wifi-deamon.sh` on the robot (`aiot-gate.sh patch`, idempotent) so
+`aiot_client` can't launch at all until the local dummycloud redirect is
+verified — closing the boot-time window where it could otherwise still
+briefly reach the real 3irobotix cloud (`aiot_client` is launched by
+`wifi-deamon.sh`'s watchdog ~6s after boot, well before `boot-hook.sh` gets a
+chance to redirect it). If the robot's firmware doesn't match what this patch
+was written against, `activate.sh` aborts here rather than activating with
+that window silently left open.
 
 **3. Verify.** Open `http://<robot-ip>` (or whatever the robot's IP is)
 in a browser — you should see the map and controls. If you don't, see
@@ -251,8 +268,14 @@ through the official Kärcher app's SoftAP flow immediately fixed it.
 
 **If a robot recovered this way connects and uploads fine but ignores every command
 from the UI while the physical button still works, don't keep debugging Valetudo —
-re-pair it through the official app first**, then re-run `karcher-cloud-switch.sh
-valetudo` (it never touches `wifi.conf`, so the fresh pairing carries over).
+re-pair it through the official app first and update firmware**, then re-run 
+`karcher-cloud-switch.sh valetudo` (it never touches `wifi.conf`, so the fresh 
+pairing carries over).
+
+This is exactly the class of problem `install.sh`'s firmware check (see "Installing
+on the robot" above) now catches immediately and by name, instead of surfacing later
+as an unexplained silent command failure — re-run `install.sh` after re-pairing to
+confirm the firmware is back to `I3.12.90` before assuming everything else is fine.
 
 ## Troubleshooting
 
@@ -310,12 +333,6 @@ script).
 
 ### Known limitations (not fixed by this tooling)
 
-- **Brief real-cloud contact on every boot in valetudo mode.** `aiot_client`
-  starts earlier in the boot sequence (via `S90robotManager`/Monitor) using
-  stock `/etc/hosts`, and only gets redirected once `S99_auto_reboot` runs
-  near the very end of boot. For that window, the robot genuinely reaches
-  the real 3irobotix cloud. Closing this needs finding what actually
-  launches `aiot_client` and hooking earlier — not attempted here.
 - **Dormant clobber-guard in `S99_auto_reboot`.** If a future vendor OTA
   ever ships `/oem/rockchip_test/auto_reboot.sh`, that vendor script's own
   guard would start overwriting our `auto_reboot.sh` on every boot. No

@@ -20,6 +20,7 @@ HOST="${1:?usage: install.sh <robot-ip-or-host>}"
 REMOTE="root@$HOST"
 REMOTE_DIR=/userdata/valetudo
 BINARY="$REPO_ROOT/build/armv7/valetudo"
+EXPECTED_FIRMWARE="I3.12.90"
 
 [ -f "$BINARY" ] || { err "ERROR: $BINARY not found — build it first"; exit 1; }
 
@@ -32,6 +33,23 @@ report_runtime_state() {
 echo "== Pre-flight =="
 ssh "${SSH_OPTS[@]}" "$REMOTE" "command -v mkdir mv cmp cat >/dev/null" \
     || { err "ERROR: robot is missing an expected coreutils/busybox applet"; exit 1; }
+
+# aiot-gate.sh's wifi-deamon.sh patch (and the rootfs analysis behind
+# karcher-cloud-switch.sh) are anchored to exact strings/offsets in
+# $EXPECTED_FIRMWARE and will refuse or silently misbehave on anything else.
+# sysVersion.ini ships as part of the stock, read-only /oem, so it's always
+# there to check — deliberately checked before touching anything else on the
+# robot, not discovered later via a half-finished install or a mysteriously
+# inert command.
+ACTUAL_FIRMWARE="$(ssh "${SSH_OPTS[@]}" "$REMOTE" "sed -n 's/^sysVersion=//p' /oem/sysconf/sysVersion.ini 2>/dev/null" || true)"
+if [ "$ACTUAL_FIRMWARE" != "$EXPECTED_FIRMWARE" ]; then
+    err "ERROR: firmware mismatch."
+    err "  expected: $EXPECTED_FIRMWARE"
+    err "  actual:   ${ACTUAL_FIRMWARE:-<unreadable — robot unreachable, or /oem/sysconf/sysVersion.ini missing/malformed>}"
+    err "This tooling is anchored to $EXPECTED_FIRMWARE specifically (see aiot-gate.sh) and will refuse or silently misbehave on a different build. Do not proceed without reviewing this tooling against your actual firmware first."
+    exit 1
+fi
+echo "OK: firmware matches expected $EXPECTED_FIRMWARE"
 
 AVAIL_KB=$(ssh "${SSH_OPTS[@]}" "$REMOTE" "df /userdata | tail -1 | awk '{print \$4}'")
 if [ "$AVAIL_KB" -lt 51200 ]; then
